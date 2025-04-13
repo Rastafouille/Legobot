@@ -3,6 +3,87 @@
 ## Description du Projet
 LegoBot est un robot construit avec des composants LEGO Technic, contrôlé par une Raspberry Pi 5. Il combine la puissance des moteurs LEGO avec des capacités avancées de vision par ordinateur, d'audio et d'affichage LED.
 
+## Installation des Dépendances
+
+### Prérequis système
+```bash
+# Mise à jour du système
+sudo apt-get update
+sudo apt-get upgrade
+
+# Installation des dépendances système
+sudo apt-get install python3-numpy python3-picamera2 python3-build-hat python3-smbus python3-spidev python3-opencv python3-pyaudio python3-scipy
+
+# Installation des dépendances Python supplémentaires
+sudo apt-get install python3-pip python3-full
+
+# Installation des packages Python non disponibles dans apt
+sudo pip3 install --break-system-packages sounddevice luma.led_matrix
+```
+
+### Configuration système requise
+Ajouter dans `/boot/config.txt` :
+```
+# Active le pilote audio I2S
+dtoverlay=i2s-mmap
+
+# Configuration pour la matrice LED
+dtoverlay=spi1-3cs
+
+# Active le Build HAT
+dtoverlay=buildhat
+
+# Active SPI
+dtparam=spi=on
+```
+
+### Bibliothèques Python utilisées
+- **Contrôle des moteurs** :
+  - `python3-build-hat` : Contrôle des moteurs LEGO via Build HAT
+
+- **Audio** :
+  - `sounddevice` : Capture et lecture audio (installé via pip)
+  - `python3-pyaudio` : Interface avec le microphone I2S
+  - `python3-scipy` : Traitement du signal audio
+
+- **Vision** :
+  - `python3-opencv` : Traitement d'image et vision par ordinateur
+  - `python3-picamera2` : Contrôle de la caméra
+
+- **Affichage** :
+  - `luma.led_matrix` : Contrôle de la matrice LED (installé via pip)
+  - `python3-spidev` : Communication SPI pour la matrice LED
+  - `python3-smbus` : Communication I2C
+
+- **Calculs** :
+  - `python3-numpy` : Calculs numériques et traitement de données
+
+## Configuration de l'Environnement
+
+### Prérequis
+```bash
+# Installation des outils nécessaires
+sudo apt-get update
+sudo apt-get install python3-venv python3-full
+
+# Création et activation de l'environnement virtuel
+python3 -m venv venv
+source venv/bin/activate
+
+# Installation des dépendances
+pip install -r requirements.txt
+```
+
+Pour activer l'environnement virtuel à chaque session :
+```bash
+source venv/bin/activate
+```
+
+Pour désactiver l'environnement virtuel :
+```bash
+deactivate
+```
+
 ## Composants Matériels
 
 ### Composants Principaux
@@ -34,17 +115,17 @@ LegoBot est un robot construit avec des composants LEGO Technic, contrôlé par 
 ### Matrice LED 8x8 (MAX7219)
 - VCC → 5V
 - GND → GND
-- DIN → GPIO 25
-- CS → GPIO 24
-- CLK → GPIO 23
+- DIN → GPIO 10 (SPI0_MOSI)
+- CS → GPIO 8 (SPI0_CE0)
+- CLK → GPIO 11 (SPI0_SCLK)
 
 ### Amplificateur Audio MAX98357 I2S
-- VDD → 3.3V
+- VDD → 5V
 - GND → GND
-- BCLK → GPIO 21
-- LRCLK → GPIO 20
-- DIN → GPIO 26
-- SD_MODE → 3.3V (pour mode normal)
+- BCLK → GPIO 18
+- LRCLK → GPIO 19
+- DIN → GPIO 20
+- SD_MODE → 3.3V (mode mono)
 - GAIN → non connecté (gain par défaut 12dB)
 - Sortie haut-parleur sur les bornes + et -
 - Puissance de sortie : 3W classe D
@@ -53,34 +134,21 @@ LegoBot est un robot construit avec des composants LEGO Technic, contrôlé par 
 ### Microphone INMP441 MEMS I2S
 - VDD → 3.3V
 - GND → GND
-- SD (Serial Data) → GPIO 19
-- SCK (Serial Clock) → GPIO 21 (partagé avec MAX98357)
-- WS (Word Select) → GPIO 20 (partagé avec MAX98357)
+- SD (Serial Data) → GPIO 16
+- SCK (Serial Clock) → GPIO 17
+- WS (Word Select) → GPIO 18
 - L/R → GND (pour canal gauche)
 Caractéristiques :
 - Type : Omnidirectionnel MEMS
 - SNR : 61dB
 - Sensibilité : -26dBFS
 - Faible consommation d'énergie
-- Format de données : 24-bit, I2S
+- Format de données : 24-bit, I2S mono
 
 ## Configuration Logicielle
 
-### Configuration système requise
-Ajouter dans `/boot/config.txt` :
-```
-# Active le pilote audio I2S
-dtoverlay=i2s-mmap
-
-# Configuration pour la matrice LED
-dtoverlay=spi1-3cs
-
-# Active le Build HAT
-dtoverlay=buildhat
-```
-
 ### Dépendances logicielles
-- buildhat (bibliothèque Python pour le LEGO Build HAT)
+- build-hat (bibliothèque Python pour le LEGO Build HAT)
 - picamera2
 - python3-numpy
 - python3-smbus (pour I2C)
@@ -118,3 +186,18 @@ legobot/
 
 ## Licence
 [À définir] 
+
+## Utilisation
+
+### Test des expressions de bouche
+```bash
+sudo python3 src/main.py
+```
+
+### Expressions disponibles
+- `sourire` : Affiche un sourire
+- `triste` : Affiche une expression triste
+- `neutre` : Affiche une expression neutre
+- `coeur` : Affiche un cœur
+- `colere` : Affiche une expression de colère
+- `vague` : Affiche une ligne ondulée 
