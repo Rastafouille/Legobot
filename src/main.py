@@ -18,7 +18,7 @@ def main():
         phrases = [
             "Bonjour, je suis le robot LEGO moumoute",
             "Je suis heureux de vous rencontrer",
-            "je suis un robot rigolo",
+            "je suis un robot rigolo ",
             "prete a jouer les filles !"
         ]
         
@@ -31,7 +31,7 @@ def main():
             # Fonction pour l'animation de bouche
             def animate_mouth():
                 while not stop_animation:
-                    mouth.animate_talk(speed=0.2)
+                    mouth.animate_talk(speed=0.15)  # Vitesse légèrement plus lente
             
             # Création des threads
             voice_thread = threading.Thread(target=voice.speak, args=(phrase,))
@@ -50,8 +50,8 @@ def main():
             
             # Retour à la bouche neutre
             mouth.show_expression("neutre")
-            # Pause entre les phrases
-            time.sleep(1)
+            # Pause plus longue entre les phrases
+            time.sleep(2)
         
     except KeyboardInterrupt:
         print("\nArrêt du programme...")

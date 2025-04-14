@@ -30,7 +30,32 @@ class RobotVoice:
             raise
 
     def speak(self, text):
-        """Fait parler le robot"""
+        """Convertit le texte en parole et joue le son"""
+        try:
+            # Génération du fichier WAV avec Piper
+            wav_file = self._generate_wav(text)
+            
+            # Lecture du fichier WAV avec aplay
+            aplay_cmd = [
+                'aplay', '-q',
+                '-f', 'S16_LE',
+                '-r', '22050',
+                #'-v', '0.8',  # Réduction du volume à 80%
+                #'-D', 'hw:0,0',
+                wav_file
+            ]
+            
+            subprocess.run(aplay_cmd, check=True)
+            
+            # Suppression du fichier WAV après lecture
+            os.remove(wav_file)
+            
+        except subprocess.CalledProcessError as e:
+            print(f"Erreur lors de la parole : {e}")
+            raise
+
+    def _generate_wav(self, text):
+        """Générer le fichier WAV à partir du texte"""
         try:
             print(f"Le robot dit : {text}")
             
@@ -68,37 +93,11 @@ class RobotVoice:
             # Remplacement du fichier original par le fichier converti
             os.replace(temp_file, wav_file)
             
-            # Lecture du fichier WAV avec aplay sur la sortie I2S MAX98357A
-            aplay_cmd = [
-                'aplay',
-                '-q',            # Mode silencieux
-               # '-D', 'hw:0,0',  # Utiliser la carte son 0 comme dans /etc/asound.conf
-                '-f', 'S16_LE',  # Format 16 bits little-endian
-                '-r', '22050',   # Fréquence d'échantillonnage
-                wav_file
-            ]
-            
-            # Lecture du fichier WAV et récupération de la durée
-            with wave.open(wav_file, 'rb') as wav:
-                frames = wav.getnframes()
-                rate = wav.getframerate()
-                duration = frames / float(rate)
-            
-            # Lecture du fichier WAV
-            subprocess.run(aplay_cmd, check=True)
-            
-            # Suppression du fichier temporaire
-            os.remove(wav_file)
-            
-            return duration
+            return wav_file
             
         except Exception as e:
-            print(f"Erreur lors de la parole : {e}")
-            if os.path.exists(wav_file):
-                os.remove(wav_file)
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-            return 0
+            print(f"Erreur lors de la génération du fichier WAV : {e}")
+            raise
 
 if __name__ == "__main__":
     # Test de la classe
