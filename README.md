@@ -18,14 +18,15 @@ sudo apt-get install python3-numpy python3-picamera2 python3-build-hat python3-s
 sudo apt-get install python3-pip python3-full
 
 # Installation des packages Python non disponibles dans apt
-sudo pip3 install --break-system-packages sounddevice luma.led_matrix
+sudo pip3 install --break-system-packages sounddevice luma.led_matrix piper-tts
 ```
 
 ### Configuration système requise
 Ajouter dans `/boot/config.txt` :
 ```
-# Active le pilote audio I2S
-dtoverlay=i2s-mmap
+# Configuration audio I2S pour MAX98357A
+dtoverlay=max98357a
+dtparam=i2s=on
 
 # Configuration pour la matrice LED
 dtoverlay=spi1-3cs
@@ -45,6 +46,7 @@ dtparam=spi=on
   - `sounddevice` : Capture et lecture audio (installé via pip)
   - `python3-pyaudio` : Interface avec le microphone I2S
   - `python3-scipy` : Traitement du signal audio
+  - `piper-tts` : Synthèse vocale (installé via pip)
 
 - **Vision** :
   - `python3-opencv` : Traitement d'image et vision par ordinateur
@@ -93,7 +95,7 @@ deactivate
 - PiCamera
 - Matrice LED 8x8 (pour l'affichage d'expressions)
 - Microphone INMP441 MEMS I2S (MH-ET LIVE)
-- Amplificateur audio MAX98357 I2S 3W classe D avec haut-parleur
+- Amplificateur audio MAX98357A I2S 3W classe D avec haut-parleur
 
 ### Alimentation
 - Alimentation Raspberry Pi 5 : 5V/5A minimum
@@ -119,12 +121,12 @@ deactivate
 - CS → GPIO 8 (SPI0_CE0)
 - CLK → GPIO 11 (SPI0_SCLK)
 
-### Amplificateur Audio MAX98357 I2S
+### Amplificateur Audio MAX98357A I2S
 - VDD → 5V
 - GND → GND
-- BCLK → GPIO 18
-- LRCLK → GPIO 19
-- DIN → GPIO 20
+- BCLK → GPIO 18 (BCLK)
+- LRCLK → GPIO 19 (LRCLK)
+- DIN → GPIO 21 (DIN)
 - SD_MODE → 3.3V (mode mono)
 - GAIN → non connecté (gain par défaut 12dB)
 - Sortie haut-parleur sur les bornes + et -
@@ -153,6 +155,7 @@ Caractéristiques :
 - python3-numpy
 - python3-smbus (pour I2C)
 - python3-spidev (pour SPI)
+- piper-tts (pour la synthèse vocale)
 
 ## Précautions
 1. **Refroidissement**
