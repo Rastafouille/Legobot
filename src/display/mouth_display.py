@@ -18,7 +18,7 @@ class MatrixFace:
         time.sleep(duration)
         self.clear()
 
-    def animate_talk(self, repeat=3, speed=0.3):
+    def animate_talk(self, duration=1, speed=0.1):
         mouth_open = [
             (1,3), (6,3),
             (0,4), (7,4),
@@ -27,7 +27,9 @@ class MatrixFace:
         mouth_closed = [
             (1,4), (2,4), (3,4), (4,4), (5,4), (6,4)
         ]
-        for _ in range(repeat):
+        
+        start_time = time.time()
+        while time.time() - start_time < duration:
             self._draw_pixels(mouth_open)
             time.sleep(speed)
             self._draw_pixels(mouth_closed)
@@ -54,7 +56,6 @@ class MatrixFace:
                 (1,7), (2,6), (3,6), (4,6), (5,6), (6,7)
             ],
             "neutre": [
-                (0,6), (1,6), (2,6), (3,6), (4,6), (5,6), (6,6), (7,6)
             ],
             "coeur": [
                 (2,1), (5,1),
