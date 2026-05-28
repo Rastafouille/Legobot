@@ -10,13 +10,16 @@ class MatrixFace:
         self.device = max7219(serial, cascaded=1, block_orientation=block_orientation, rotate=rotate)
 
     def show_expression(self, name, duration=1):
+        self.set_expression(name)
+        time.sleep(duration)
+        self.clear()
+
+    def set_expression(self, name):
         expressions = self._expressions()
         pattern = expressions.get(name, [])
         with canvas(self.device) as draw:
             for x, y in pattern:
                 draw.point((x, y), fill="white")
-        time.sleep(duration)
-        self.clear()
 
     def animate_talk(self, duration=1, speed=0.1):
         mouth_open = [
