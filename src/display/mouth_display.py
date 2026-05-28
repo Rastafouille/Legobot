@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-from luma.led_matrix.device import max7219
-from luma.core.interface.serial import spi, noop
-from luma.core.render import canvas
+import os
 import time
 
+from luma.core.interface.serial import noop, spi
+from luma.core.render import canvas
+from luma.led_matrix.device import max7219
+
+
 class MatrixFace:
-    def __init__(self, rotate=0, block_orientation=90):
+    def __init__(self, rotate=None, block_orientation=90):
+        if rotate is None:
+            rotate = int(os.getenv("LEGOBOT_MOUTH_ROTATE", "1"))
         serial = spi(port=0, device=0, gpio=noop())
         self.device = max7219(serial, cascaded=1, block_orientation=block_orientation, rotate=rotate)
 
@@ -16,31 +21,29 @@ class MatrixFace:
 
     def set_expression(self, name):
         expressions = self._expressions()
-        pattern = expressions.get(name, [])
-        with canvas(self.device) as draw:
-            for x, y in pattern:
-                draw.point((x, y), fill="white")
+        pattern = expressions.get(name, expressions["neutre"])
+        self._draw_pixels(pattern)
+
+    def play_animation(self, name, duration=2, speed=0.12):
+        animations = self._animations()
+        frames = animations.get(name)
+        if not frames:
+            self.set_expression(name)
+            return
+
+        end_time = time.time() + duration
+        while time.time() < end_time:
+            for frame in frames:
+                self._draw_pixels(frame)
+                time.sleep(speed)
+                if time.time() >= end_time:
+                    break
 
     def animate_talk(self, duration=1, speed=0.1):
-        mouth_open = [
-            (1,3), (6,3),
-            (0,4), (7,4),
-            (1,5), (2,6), (3,6), (4,6), (5,6), (6,5)
-        ]
-        mouth_closed = [
-            (1,4), (2,4), (3,4), (4,4), (5,4), (6,4)
-        ]
-        
-        start_time = time.time()
-        while time.time() - start_time < duration:
-            self._draw_pixels(mouth_open)
-            time.sleep(speed)
-            self._draw_pixels(mouth_closed)
-            time.sleep(speed)
-        self.clear()
+        self.play_animation("parle", duration=duration, speed=speed)
 
     def clear(self):
-        with canvas(self.device) as draw:
+        with canvas(self.device):
             pass
 
     def _draw_pixels(self, pixels):
@@ -48,48 +51,272 @@ class MatrixFace:
             for x, y in pixels:
                 draw.point((x, y), fill="white")
 
+    def _pattern(self, rows):
+        pixels = []
+        for y, row in enumerate(rows):
+            for x, value in enumerate(row[:8]):
+                if value != ".":
+                    pixels.append((x, y))
+        return pixels
+
     def _expressions(self):
         return {
-            "sourire": [
-                (0,5), (7,5),
-                (1,6), (2,7), (3,7), (4,7), (5,7), (6,6)
-            ],
-            "triste": [
-                (0,6), (7,6),
-                (1,7), (2,6), (3,6), (4,6), (5,6), (6,7)
-            ],
-            "neutre": [
-            ],
-            "coeur": [
-                (2,1), (5,1),
-                (1,2), (3,2), (4,2), (6,2),
-                (0,3), (1,3), (2,3), (3,3), (4,3), (5,3), (6,3), (7,3),
-                (0,4), (1,4), (2,4), (3,4), (4,4), (5,4), (6,4), (7,4),
-                (1,5), (2,5), (3,5), (4,5), (5,5), (6,5),
-                (2,6), (3,6), (4,6), (5,6),
-                (3,7), (4,7)
-            ],
-            "colere": [
-                (0,2), (1,1), (2,1), (5,1), (6,1), (7,2),
-                (1,3), (2,3), (3,3), (4,3), (5,3), (6,3)
-            ],
-            "vague": [
-                (0,4), (1,3), (2,4), (3,3),
-                (4,4), (5,3), (6,4), (7,3)
-            ]
+            "neutre": self._pattern([
+                "........",
+                "........",
+                "........",
+                "........",
+                ".######.",
+                "........",
+                "........",
+                "........",
+            ]),
+            "sourire": self._pattern([
+                "........",
+                "........",
+                "........",
+                "#......#",
+                ".#....#.",
+                "..####..",
+                "........",
+                "........",
+            ]),
+            "grand_sourire": self._pattern([
+                "........",
+                "........",
+                "#......#",
+                "#.####.#",
+                ".#....#.",
+                "..####..",
+                "........",
+                "........",
+            ]),
+            "triste": self._pattern([
+                "........",
+                "........",
+                "........",
+                "..####..",
+                ".#....#.",
+                "#......#",
+                "........",
+                "........",
+            ]),
+            "surpris": self._pattern([
+                "........",
+                "..####..",
+                ".#....#.",
+                ".#....#.",
+                ".#....#.",
+                "..####..",
+                "........",
+                "........",
+            ]),
+            "parle": self._pattern([
+                "........",
+                "........",
+                "..####..",
+                ".######.",
+                ".######.",
+                "..####..",
+                "........",
+                "........",
+            ]),
+            "coeur": self._pattern([
+                "........",
+                "..#..#..",
+                ".######.",
+                "########",
+                "########",
+                "..####..",
+                "...##...",
+                "........",
+            ]),
+            "colere": self._pattern([
+                "........",
+                "........",
+                "#......#",
+                ".######.",
+                "..#..#..",
+                ".######.",
+                "........",
+                "........",
+            ]),
+            "vague": self._pattern([
+                "........",
+                "........",
+                "........",
+                ".##..##.",
+                "#..##..#",
+                "........",
+                "........",
+                "........",
+            ]),
+            "baiser": self._pattern([
+                "........",
+                "........",
+                "...##...",
+                "..####..",
+                "...##...",
+                "........",
+                "........",
+                "........",
+            ]),
         }
+
+    def _animations(self):
+        return {
+            "parle": [
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    ".######.",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    "..####..",
+                    ".#....#.",
+                    ".#....#.",
+                    "..####..",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "..####..",
+                    ".######.",
+                    ".######.",
+                    ".######.",
+                    "..####..",
+                    "........",
+                    "........",
+                ]),
+            ],
+            "respire": [
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    "..####..",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    ".######.",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    "..####..",
+                    ".#....#.",
+                    "..####..",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+            ],
+            "charge": [
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    "#.......",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    "###.....",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    "#####...",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    "........",
+                    "########",
+                    "........",
+                    "........",
+                    "........",
+                    "........",
+                ]),
+            ],
+            "rire": [
+                self._pattern([
+                    "........",
+                    "........",
+                    "#......#",
+                    ".######.",
+                    ".#....#.",
+                    "..####..",
+                    "........",
+                    "........",
+                ]),
+                self._pattern([
+                    "........",
+                    "........",
+                    ".#....#.",
+                    "..####..",
+                    ".######.",
+                    "#......#",
+                    "........",
+                    "........",
+                ]),
+            ],
+            "coeur_pulse": [
+                self._expressions()["coeur"],
+                self._pattern([
+                    ".##..##.",
+                    "########",
+                    "########",
+                    "########",
+                    ".######.",
+                    "..####..",
+                    "...##...",
+                    "........",
+                ]),
+            ],
+        }
+
 
 if __name__ == "__main__":
     mouth = MatrixFace()
     try:
-        print("Démarrage du test des expressions...")
-        mouth.show_expression("sourire")
-        mouth.show_expression("triste")
-        mouth.show_expression("neutre")
-        mouth.show_expression("coeur")
-        mouth.show_expression("colere")
-        mouth.show_expression("vague")
+        print("Demarrage du test des expressions...")
+        for expression in mouth._expressions():
+            print(expression)
+            mouth.show_expression(expression)
         mouth.animate_talk()
     except KeyboardInterrupt:
         mouth.clear()
-        print("\nProgramme terminé")
+        print("\nProgramme termine")

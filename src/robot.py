@@ -28,9 +28,27 @@ class MockVoice:
 class MockMotion:
     def perform(self, command):
         print(f"[motion] {command}")
+        return {"ok": True, "message": command}
+
+    def drive_for(self, command, speed=None, seconds=None):
+        print(f"[motion] {command} speed={speed} seconds={seconds}")
+        return {"ok": True, "message": command}
+
+    def drive_vector(self, x, y, speed=None, seconds=None, continuous=False):
+        print(f"[motion] joystick x={x} y={y} speed={speed} seconds={seconds} continuous={continuous}")
+        return {"ok": True, "message": "joystick"}
+
+    def set_head_position(self, position, speed=None):
+        print(f"[motion] head position={position} speed={speed}")
+        return {"ok": True, "message": "head position"}
+
+    def set_eyes_position(self, position, speed=None):
+        print(f"[motion] eyes position={position} speed={speed}")
+        return {"ok": True, "message": "eyes position"}
 
     def stop(self):
         print("[motion] stop")
+        return {"ok": True, "message": "stop"}
 
 
 class LegoBotRobot:
