@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import subprocess
+import threading
 import time
 
 
@@ -52,6 +53,7 @@ class BuildHatMotion:
         self.eyes_degrees = eyes_degrees
         self.left_sign = -1 if self._env_bool("LEGOBOT_LEFT_INVERTED", left_inverted) else 1
         self.right_sign = -1 if self._env_bool("LEGOBOT_RIGHT_INVERTED", right_inverted) else 1
+        self._lock = threading.Lock()
 
         self.left = self._motor(self.left_port, "left")
         self.right = self._motor(self.right_port, "right")
@@ -122,15 +124,15 @@ class BuildHatMotion:
             return {"ok": False, "message": "Moteur de tete indisponible"}
 
         degrees = self.head_degrees if degrees is None else int(degrees)
-        self.head.run_for_degrees(degrees, speed=self.speed)
-        return {"ok": True, "message": f"Tete: {degrees} degres"}
+        self._pulse_motor(self.head, degrees, self.speed, max_seconds=0.45)
+        return {"ok": True, "message": f"Tete impulsion {degrees}"}
 
     def center_head(self):
         if self.head is None:
             return {"ok": False, "message": "Moteur de tete indisponible"}
 
-        self.head.run_to_position(0, speed=self.speed)
-        return {"ok": True, "message": "Tete centree"}
+        self.head.stop()
+        return {"ok": True, "message": "Tete stop/centre"}
 
     def set_head_position(self, position, speed=None):
         if self.head is None:
@@ -138,7 +140,7 @@ class BuildHatMotion:
 
         run_speed = self.speed if speed is None else abs(int(speed))
         position = max(-90, min(90, int(position)))
-        self.head.run_to_position(position, speed=run_speed)
+        self._pulse_motor(self.head, position, run_speed, max_seconds=0.7)
         return {"ok": True, "message": f"Tete position {position}", "position": position}
 
     def move_eyes(self, degrees=None):
@@ -146,15 +148,15 @@ class BuildHatMotion:
             return {"ok": False, "message": "Moteur des yeux indisponible"}
 
         degrees = self.eyes_degrees if degrees is None else int(degrees)
-        self.eyes.run_for_degrees(degrees, speed=self.speed)
-        return {"ok": True, "message": f"Yeux: {degrees} degres"}
+        self._pulse_motor(self.eyes, degrees, self.speed, max_seconds=0.35)
+        return {"ok": True, "message": f"Yeux impulsion {degrees}"}
 
     def center_eyes(self):
         if self.eyes is None:
             return {"ok": False, "message": "Moteur des yeux indisponible"}
 
-        self.eyes.run_to_position(0, speed=self.speed)
-        return {"ok": True, "message": "Yeux centres"}
+        self.eyes.stop()
+        return {"ok": True, "message": "Yeux stop/centre"}
 
     def set_eyes_position(self, position, speed=None):
         if self.eyes is None:
@@ -162,13 +164,14 @@ class BuildHatMotion:
 
         run_speed = self.speed if speed is None else abs(int(speed))
         position = max(-45, min(45, int(position)))
-        self.eyes.run_to_position(position, speed=run_speed)
+        self._pulse_motor(self.eyes, position, run_speed, max_seconds=0.45)
         return {"ok": True, "message": f"Yeux position {position}", "position": position}
 
     def stop(self):
-        for motor in (self.left, self.right, self.head, self.eyes):
-            if motor is not None:
-                motor.stop()
+        with self._lock:
+            for motor in (self.left, self.right, self.head, self.eyes):
+                if motor is not None:
+                    motor.stop()
         return {"ok": True, "message": "Stop"}
 
     def drive(self, left_speed, right_speed):
@@ -178,8 +181,9 @@ class BuildHatMotion:
             return {"ok": False, "message": "Moteurs gauche/droite indisponibles"}
         hardware_left_speed = left_speed * self.left_sign
         hardware_right_speed = right_speed * self.right_sign
-        self.left.start(hardware_left_speed)
-        self.right.start(hardware_right_speed)
+        with self._lock:
+            self.left.start(hardware_left_speed)
+            self.right.start(hardware_right_speed)
         time.sleep(self.move_seconds)
         self.stop()
         return {
@@ -199,8 +203,9 @@ class BuildHatMotion:
 
         hardware_left_speed = left_speed * self.left_sign
         hardware_right_speed = right_speed * self.right_sign
-        self.left.start(hardware_left_speed)
-        self.right.start(hardware_right_speed)
+        with self._lock:
+            self.left.start(hardware_left_speed)
+            self.right.start(hardware_right_speed)
         return {
             "ok": True,
             "message": f"Continuous L={left_speed} R={right_speed}",
@@ -220,6 +225,34 @@ class BuildHatMotion:
         except Exception as exc:
             print(f"Moteur {label} sur port {port} indisponible: {exc}")
             return None
+
+    def _run_motor(self, motor, method_name, *args, **kwargs):
+        with self._lock:
+            method = getattr(motor, method_name)
+            try:
+                return method(*args, **kwargs)
+            except TypeError:
+                kwargs.pop("blocking", None)
+                return method(*args, **kwargs)
+
+    def _pulse_motor(self, motor, direction_value, speed, max_seconds=0.4):
+        direction_value = int(direction_value)
+        if direction_value == 0:
+            with self._lock:
+                motor.stop()
+            return
+
+        signed_speed = abs(int(speed)) if direction_value > 0 else -abs(int(speed))
+        seconds = min(max_seconds, max(0.08, abs(direction_value) / 120.0))
+
+        def run_pulse():
+            with self._lock:
+                motor.start(signed_speed)
+            time.sleep(seconds)
+            with self._lock:
+                motor.stop()
+
+        threading.Thread(target=run_pulse, daemon=True).start()
 
     def status(self):
         return {

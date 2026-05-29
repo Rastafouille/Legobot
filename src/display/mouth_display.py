@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import threading
 import time
 
 from luma.core.interface.serial import noop, spi
@@ -11,8 +12,31 @@ class MatrixFace:
     def __init__(self, rotate=None, block_orientation=90):
         if rotate is None:
             rotate = int(os.getenv("LEGOBOT_MOUTH_ROTATE", "1"))
+        self.rotate = rotate
+        self.block_orientation = block_orientation
+        self._lock = threading.RLock()
+        self._init_device()
+        self.reset(show_ready=False)
+
+    def _init_device(self):
         serial = spi(port=0, device=0, gpio=noop())
-        self.device = max7219(serial, cascaded=1, block_orientation=block_orientation, rotate=rotate)
+        self.device = max7219(
+            serial,
+            cascaded=1,
+            block_orientation=self.block_orientation,
+            rotate=self.rotate,
+        )
+
+    def reset(self, show_ready=True):
+        with self._lock:
+            self._init_device()
+            try:
+                self.device.contrast(8)
+            except AttributeError:
+                pass
+            self.clear()
+            if show_ready:
+                self._draw_pixels(self._expressions()["neutre"])
 
     def show_expression(self, name, duration=1):
         self.set_expression(name)
@@ -43,13 +67,15 @@ class MatrixFace:
         self.play_animation("parle", duration=duration, speed=speed)
 
     def clear(self):
-        with canvas(self.device):
-            pass
+        with self._lock:
+            with canvas(self.device):
+                pass
 
     def _draw_pixels(self, pixels):
-        with canvas(self.device) as draw:
-            for x, y in pixels:
-                draw.point((x, y), fill="white")
+        with self._lock:
+            with canvas(self.device) as draw:
+                for x, y in pixels:
+                    draw.point((x, y), fill="white")
 
     def _pattern(self, rows):
         pixels = []

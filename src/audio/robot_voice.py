@@ -28,8 +28,12 @@ class RobotVoice:
                 [
                     "aplay",
                     "-q",
+                    "-D",
+                    os.getenv("LEGOBOT_AUDIO_DEVICE", "plughw:CARD=MAX98357A,DEV=0"),
                     "-f",
                     "S16_LE",
+                    "-c",
+                    "1",
                     "-r",
                     "22050",
                     wav_file,
