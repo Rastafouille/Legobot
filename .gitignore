@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+src/audio/wav/
+data/

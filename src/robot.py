@@ -16,6 +16,12 @@ class MockFace:
         print("[mouth] talk")
         time.sleep(duration)
 
+    def set_bitmap(self, rows):
+        print(f"[mouth bitmap] {rows}")
+
+    def show_text(self, text, duration=1.6, speed=0.12):
+        print(f"[mouth text] {text}")
+
     def clear(self):
         print("[mouth] clear")
 

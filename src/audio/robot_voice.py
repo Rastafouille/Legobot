@@ -3,33 +3,71 @@ import os
 import subprocess
 import time
 import wave
+from pathlib import Path
 
 from piper.voice import PiperVoice
 
 
 class RobotVoice:
-    def __init__(self):
+    def __init__(self, model_name=None):
         print("Initialisation de la voix...")
         try:
-            model_path = os.path.join(os.path.dirname(__file__), "fr_FR-gilles-low.onnx")
-            self.voice = PiperVoice.load(model_path)
-            print("Modele de voix charge avec succes")
+            self.audio_dir = Path(__file__).resolve().parent
+            self.model_name = None
+            self.voice = None
+            self.load_voice(model_name or os.getenv("LEGOBOT_VOICE_MODEL", "next"))
 
-            self.wav_dir = os.path.join(os.path.dirname(__file__), "wav")
+            self.wav_dir = str(self.audio_dir / "wav")
             os.makedirs(self.wav_dir, exist_ok=True)
         except Exception as exc:
             print(f"Erreur lors de l'initialisation de la voix : {exc}")
             raise
 
-    def speak(self, text, gain_db=None):
+    @classmethod
+    def available_voices(cls):
+        audio_dir = Path(__file__).resolve().parent
+        voices = []
+        for model_path in sorted(audio_dir.glob("*.onnx")):
+            voices.append({
+                "id": model_path.stem,
+                "name": model_path.stem.replace("_", " "),
+                "path": str(model_path),
+                "config": str(model_path.with_suffix(".onnx.json")),
+                "has_config": model_path.with_suffix(".onnx.json").exists(),
+            })
+        return voices
+
+    def load_voice(self, model_name):
+        model_name = (model_name or "next").replace(".onnx", "")
+        if self.model_name == model_name and self.voice is not None:
+            return
+
+        model_path = self.audio_dir / f"{model_name}.onnx"
+        if not model_path.exists():
+            raise FileNotFoundError(f"Voix Piper introuvable: {model_name}")
+
+        print(f"Chargement voix Piper: {model_name}")
+        self.voice = PiperVoice.load(str(model_path))
+        self.model_name = model_name
+        print("Modele de voix charge avec succes")
+
+    def speak(self, text, gain_db=None, voice_model=None, on_play_start=None, on_play_end=None):
+        if voice_model:
+            self.load_voice(voice_model)
         wav_file = self._generate_wav(text, gain_db=gain_db)
         try:
+            if on_play_start:
+                on_play_start()
             subprocess.run(
                 [
                     "aplay",
                     "-q",
+                    "-D",
+                    os.getenv("LEGOBOT_AUDIO_DEVICE", "plughw:CARD=MAX98357A,DEV=0"),
                     "-f",
                     "S16_LE",
+                    "-c",
+                    "1",
                     "-r",
                     "22050",
                     wav_file,
@@ -37,6 +75,8 @@ class RobotVoice:
                 check=True,
             )
         finally:
+            if on_play_end:
+                on_play_end()
             if os.path.exists(wav_file):
                 os.remove(wav_file)
 

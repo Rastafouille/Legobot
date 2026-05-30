@@ -1,206 +1,365 @@
-# LegoBot - Robot LEGO Technic avec Raspberry Pi 5
+# LegoBot / Briqo
 
-## Description du Projet
-LegoBot est un robot construit avec des composants LEGO Technic, contrôlé par une Raspberry Pi 5. Il combine la puissance des moteurs LEGO avec des capacités avancées de vision par ordinateur, d'audio et d'affichage LED.
+Briqo est un robot LEGO mobile pilote par une Raspberry Pi 5. Il combine un LEGO
+Build HAT, quatre moteurs, une bouche LED MAX7219, une voix locale avec Piper et
+un assistant local base sur Ollama.
 
-## Installation des Dépendances
+Le robot est pense comme un compagnon educatif pour Juliette et Roxane. Il vit
+dans le sud de la France avec Jeremy, Berengere et les enfants. Il repond en
+francais, garde le fil de la conversation, peut parler, afficher une expression
+sur sa bouche LED, bouger la tete, les yeux et les chenilles.
 
-### Prérequis système
-```bash
-# Mise à jour du système
-sudo apt-get update
-sudo apt-get upgrade
+## Etat Actuel
 
-# Installation des dépendances système
-sudo apt-get install python3-numpy python3-picamera2 python3-build-hat python3-smbus python3-spidev python3-opencv python3-pyaudio python3-scipy
+- Interface web de pilotage sur `http://192.168.1.62:8080`
+- Service systemd `legobot-web.service` lance au demarrage de la Raspberry Pi
+- Ollama principal sur le PC du reseau: `http://192.168.1.12:11434`
+- Modele principal: `qwen3.5:latest`
+- Fallback local sur la Raspberry Pi: `qwen2.5:1.5b`
+- Voix locale avec Piper et le modele `fr_FR-gilles-low.onnx`
+- Selecteur de voix Piper base sur les fichiers `.onnx` presents dans `src/audio`
+- Bouche LED MAX7219 avec expressions et animations
+- Historique de conversation persistant dans `data/conversation_history.jsonl`
+- Gestes IA optionnels, limites par liste blanche
 
-# Installation des dépendances Python supplémentaires
-sudo apt-get install python3-pip python3-full
+## Architecture
 
-# Installation des packages Python non disponibles dans apt
-sudo pip3 install --break-system-packages sounddevice luma.led_matrix piper-tts
+```text
+Navigateur
+  -> Flask sur Raspberry Pi 5
+      -> Build HAT: moteurs, tete, yeux, chenilles
+      -> MAX7219: bouche LED
+      -> Piper + MAX98357A: voix
+      -> Ollama PC: qwen3.5:latest
+      -> Ollama Raspberry: qwen2.5:1.5b en secours
 ```
 
-### Configuration système requise
-Ajouter dans `/boot/config.txt` :
-```
-# Configuration audio I2S pour MAX98357A
-dtoverlay=max98357a
-dtparam=i2s=on
+Ollama ne controle jamais directement les moteurs. Il propose une intention sous
+forme de texte ou de JSON. Le code Flask valide ensuite les expressions et les
+mouvements autorises avant d'agir.
 
-# Configuration pour la matrice LED
-dtoverlay=spi1-3cs
+## Interface Web
 
-# Active le Build HAT
-dtoverlay=buildhat
+Lancer dans un navigateur:
 
-# Active SPI
-dtparam=spi=on
+```text
+http://192.168.1.62:8080
 ```
 
-### Bibliothèques Python utilisées
-- **Contrôle des moteurs** :
-  - `python3-build-hat` : Contrôle des moteurs LEGO via Build HAT
+L'interface permet de:
 
-- **Audio** :
-  - `sounddevice` : Capture et lecture audio (installé via pip)
-  - `python3-pyaudio` : Interface avec le microphone I2S
-  - `python3-scipy` : Traitement du signal audio
-  - `piper-tts` : Synthèse vocale (installé via pip)
+- piloter les chenilles avec un joystick
+- bouger la tete et les yeux
+- choisir une expression de bouche
+- lancer une animation de bouche
+- afficher une lettre, un chiffre, un mot court ou un bitmap 8x8 sur la bouche
+- reinitialiser la bouche LED
+- redemarrer le service moteur si le Build HAT devient muet
+- faire parler Briqo
+- choisir une voix Piper
+- envoyer une question a l'assistant
+- autoriser ou non les gestes simples de l'IA
+- effacer l'historique de conversation
 
-- **Vision** :
-  - `python3-opencv` : Traitement d'image et vision par ordinateur
-  - `python3-picamera2` : Contrôle de la caméra
+## Assistant
 
-- **Affichage** :
-  - `luma.led_matrix` : Contrôle de la matrice LED (installé via pip)
-  - `python3-spidev` : Communication SPI pour la matrice LED
-  - `python3-smbus` : Communication I2C
+Par defaut, Briqo utilise le modele du PC:
 
-- **Calculs** :
-  - `python3-numpy` : Calculs numériques et traitement de données
-
-## Configuration de l'Environnement
-
-### Prérequis
-```bash
-# Installation des outils nécessaires
-sudo apt-get update
-sudo apt-get install python3-venv python3-full
-
-# Création et activation de l'environnement virtuel
-python3 -m venv venv
-source venv/bin/activate
-
-# Installation des dépendances
-pip install -r requirements.txt
+```text
+LEGOBOT_OLLAMA_URL=http://192.168.1.12:11434
+LEGOBOT_OLLAMA_MODEL=qwen3.5:latest
 ```
 
-Pour activer l'environnement virtuel à chaque session :
-```bash
-source venv/bin/activate
+Si le PC ou ce modele ne repond pas, le code bascule sur la Raspberry:
+
+```text
+LEGOBOT_FALLBACK_OLLAMA_URL=http://127.0.0.1:11434
+LEGOBOT_FALLBACK_OLLAMA_MODEL=qwen2.5:1.5b
 ```
 
-Pour désactiver l'environnement virtuel :
-```bash
-deactivate
+Le PC doit lancer Ollama avec:
+
+```text
+OLLAMA_HOST=0.0.0.0:11434
 ```
 
-## Composants Matériels
+Sous Windows, cette variable est configuree avec `setx`, et Ollama est ajoute au
+demarrage de session utilisateur.
 
-### Composants Principaux
+## Voix Piper
+
+Les voix disponibles sont detectees automatiquement dans:
+
+```text
+src/audio/*.onnx
+```
+
+Chaque modele doit avoir son fichier de configuration associe:
+
+```text
+src/audio/nom-de-voix.onnx
+src/audio/nom-de-voix.onnx.json
+```
+
+L'interface appelle `GET /api/voices` puis remplit le selecteur de voix. La voix
+choisie est envoyee a `/api/say` et `/api/ask` avec `voice_model`.
+
+Voix installees:
+
+```text
+fr_FR-gilles-low
+tom1
+tom2
+next
+```
+
+Les voix `tom1`, `tom2` et `next` viennent du depot
+`tjiho/French-tts-model-piper`, qui fournit trois modeles francais Piper
+entraines a partir de textes francais.
+
+Voix par defaut configurable:
+
+```text
+LEGOBOT_VOICE_MODEL=next
+```
+
+## Memoire De Conversation
+
+Les messages utilisateur et assistant sont conserves dans une memoire courte et
+sauvegardes dans:
+
+```text
+data/conversation_history.jsonl
+```
+
+Au redemarrage du service, les derniers messages sont relus puis reinjectes dans
+les appels Ollama. Cela permet a Briqo de garder le fil de la discussion.
+
+Parametres utiles:
+
+```text
+LEGOBOT_HISTORY_FILE=data/conversation_history.jsonl
+LEGOBOT_HISTORY_MAX_MESSAGES=24
+LEGOBOT_OLLAMA_MAX_TOKENS=520
+```
+
+## Gestes IA
+
+Le mode "Autoriser gestes simples" demande a Ollama de repondre avec un JSON:
+
+```json
+{
+  "say": "Bonjour Juliette !",
+  "expression": "grand_sourire",
+  "motion": "head_center"
+}
+```
+
+Les expressions autorisees:
+
+```text
+neutre, sourire, grand_sourire, triste, surpris, parle,
+coeur, colere, vague, baiser
+```
+
+Les mouvements autorises:
+
+```text
+none, head_left, head_right, head_center,
+eyes_up, eyes_down, eyes_center,
+forward, backward, left, right, stop
+```
+
+Tout mouvement ou expression hors liste est ignore ou remplace par une valeur
+sure.
+
+La bouche peut aussi recevoir une sortie visuelle plus libre:
+
+```json
+{
+  "mouth": {
+    "mode": "text",
+    "value": "OK"
+  }
+}
+```
+
+ou un bitmap 8x8 strict:
+
+```json
+{
+  "mouth": {
+    "mode": "bitmap",
+    "pixels": [
+      "........",
+      "..####..",
+      ".#....#.",
+      ".#.##.#.",
+      ".#....#.",
+      "..####..",
+      "........",
+      "........"
+    ]
+  }
+}
+```
+
+Le code valide exactement 8 lignes de 8 caracteres. `#` allume une LED, `.`
+l'eteint. Les lettres et chiffres sont rendus avec une petite police 5x7 et les
+mots defilent automatiquement.
+
+Pour les dessins, preferer les icones integrees au bitmap libre. Une matrice 8x8
+est tres limitee, donc les bitmaps generes directement par le LLM sont souvent
+peu lisibles. Les icones disponibles sont:
+
+```text
+coeur, etoile, soleil, lune, maison, eclair, fleur, livre, note, check, croix,
+ampoule
+```
+
+Exemple:
+
+```json
+{
+  "mouth": {
+    "mode": "icon",
+    "value": "etoile"
+  }
+}
+```
+
+Apres un defilement de texte, la bouche revient automatiquement sur `sourire`.
+
+## Materiel
+
 - Raspberry Pi 5
 - LEGO Build HAT
 - 4 moteurs LEGO Technic
-- PiCamera
-- Matrice LED 8x8 (pour l'affichage d'expressions)
-- Microphone INMP441 MEMS I2S (MH-ET LIVE)
-- Amplificateur audio MAX98357A I2S 3W classe D avec haut-parleur
+- Matrice LED 8x8 MAX7219 pour la bouche
+- Amplificateur MAX98357A I2S + haut-parleur
+- Micro USB prevu pour la future reconnaissance vocale
+- Alimentation separee pour le Build HAT et les moteurs
 
-### Alimentation
-- Alimentation Raspberry Pi 5 : 5V/5A minimum
-- Alimentation séparée pour le Build HAT et les moteurs
+## Ports Moteurs
 
-## Schéma de Câblage
-
-### Build HAT (Broches réservées)
-- GPIO 0/1 : ID PROM
-- GPIO 4 : Reset
-- GPIO 14 : Tx
-- GPIO 15 : Rx
-- GPIO 16 : RTS
-- GPIO 17 : CTS
-
-### PiCamera
-- Connexion via le port CSI dédié de la Raspberry Pi 5
-
-### Matrice LED 8x8 (MAX7219)
-- VCC → 5V
-- GND → GND
-- DIN → GPIO 10 (SPI0_MOSI)
-- CS → GPIO 8 (SPI0_CE0)
-- CLK → GPIO 11 (SPI0_SCLK)
-
-### Amplificateur Audio MAX98357A I2S
-- VDD → 5V
-- GND → GND
-- BCLK → GPIO 18 (BCLK)
-- LRCLK → GPIO 19 (LRCLK)
-- DIN → GPIO 21 (DIN)
-- SD_MODE → 3.3V (mode mono)
-- GAIN → non connecté (gain par défaut 12dB)
-- Sortie haut-parleur sur les bornes + et -
-- Puissance de sortie : 3W classe D
-- DAC intégré sans filtre
-
-### Microphone INMP441 MEMS I2S
-- VDD → 3.3V
-- GND → GND
-- SD (Serial Data) → GPIO 16
-- SCK (Serial Clock) → GPIO 17
-- WS (Word Select) → GPIO 18
-- L/R → GND (pour canal gauche)
-Caractéristiques :
-- Type : Omnidirectionnel MEMS
-- SNR : 61dB
-- Sensibilité : -26dBFS
-- Faible consommation d'énergie
-- Format de données : 24-bit, I2S mono
-
-## Configuration Logicielle
-
-### Dépendances logicielles
-- build-hat (bibliothèque Python pour le LEGO Build HAT)
-- picamera2
-- python3-numpy
-- python3-smbus (pour I2C)
-- python3-spidev (pour SPI)
-- piper-tts (pour la synthèse vocale)
-
-## Précautions
-1. **Refroidissement**
-   - Installer un dissipateur thermique sur la Raspberry Pi 5
-   - Prévoir une ventilation adéquate
-
-2. **Alimentation**
-   - Utiliser une alimentation de qualité pour la Raspberry Pi 5
-   - Ne pas oublier l'alimentation séparée pour les moteurs via le Build HAT
-
-3. **Protection**
-   - Vérifier toutes les connexions avant la mise sous tension
-   - S'assurer d'une bonne masse commune
-   - Protéger les composants des interférences électromagnétiques
-
-## Structure du Projet
-```
-legobot/
-├── README.md
-├── src/
-│   ├── motor_control/
-│   ├── vision/
-│   ├── audio/
-│   └── display/
-├── config/
-└── tests/
+```text
+A: yeux
+B: rotation de la tete
+C: chenille droite
+D: chenille gauche
 ```
 
-## Statut du Projet
-🚧 En développement
+La chenille droite est inversee dans le code pour compenser le montage. Les
+chenilles C/D sont pilotees en PWM pour donner plus de couple et eviter les
+commandes de vitesse trop molles du Build HAT.
 
-## Licence
-[À définir] 
+## Cablage Principal
 
-## Utilisation
+### MAX7219
 
-### Test des expressions de bouche
+```text
+VCC -> 5V
+GND -> GND
+DIN -> GPIO 10 / SPI0 MOSI
+CS  -> GPIO 8 / SPI0 CE0
+CLK -> GPIO 11 / SPI0 SCLK
+```
+
+### MAX98357A
+
+```text
+VDD   -> 5V
+GND   -> GND
+BCLK  -> GPIO 18
+LRCLK -> GPIO 19
+DIN   -> GPIO 21
+```
+
+### Build HAT
+
+Le Build HAT reserve notamment:
+
+```text
+GPIO 4  : reset
+GPIO 14 : TX
+GPIO 15 : RX
+GPIO 16 : RTS
+GPIO 17 : CTS
+```
+
+## Installation Raspberry Pi
+
+Dependances systeme principales:
+
 ```bash
-sudo python3 src/main.py
+sudo apt-get update
+sudo apt-get install -y python3-build-hat python3-spidev python3-smbus \
+  python3-scipy python3-pip python3-full sox
+sudo pip3 install --break-system-packages flask luma.led_matrix piper-tts
 ```
 
-### Expressions disponibles
-- `sourire` : Affiche un sourire
-- `triste` : Affiche une expression triste
-- `neutre` : Affiche une expression neutre
-- `coeur` : Affiche un cœur
-- `colere` : Affiche une expression de colère
-- `vague` : Affiche une ligne ondulée 
+Ollama local de secours:
+
+```bash
+ollama pull qwen2.5:1.5b
+```
+
+## Service Au Demarrage
+
+Le service est versionne dans:
+
+```text
+deploy/legobot-web.service
+```
+
+Installation sur la Raspberry:
+
+```bash
+sudo install -m 0644 deploy/legobot-web.service /etc/systemd/system/legobot-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable legobot-web.service
+sudo systemctl restart legobot-web.service
+```
+
+Verification:
+
+```bash
+systemctl status legobot-web.service
+journalctl -u legobot-web.service -n 100 --no-pager
+curl http://127.0.0.1:8080/api/status
+```
+
+## Endpoints Utiles
+
+```text
+GET  /api/status
+POST /api/ask
+POST /api/say
+GET  /api/voices
+POST /api/mouth
+POST /api/mouth-animation
+POST /api/mouth-text
+POST /api/mouth-bitmap
+POST /api/mouth-icon
+POST /api/mouth-reset
+POST /api/head
+POST /api/eyes
+POST /api/joystick
+POST /api/stop
+POST /api/motors-reset
+POST /api/motor-test
+GET  /api/history
+POST /api/history/clear
+```
+
+## Notes
+
+- Tete et yeux utilisent des impulsions courtes, car les commandes positionnelles
+  Build HAT peuvent bloquer.
+- La bouche LED demarre et revient par defaut sur un sourire.
+- La bouche LED peut etre reinitialisee depuis l'interface avec "Reset bouche LED".
+- Le bouton "Reset moteurs" redemarre le service web via systemd. C'est plus lent
+  qu'un reset a chaud, mais plus fiable quand le thread serie Build HAT se bloque.
+- Le volume Piper peut clipper si le gain est trop haut. Un gain entre 2 et 4 est
+  generalement plus propre que 18.
+- Le micro USB est la prochaine etape pour ajouter speech-to-text local.
