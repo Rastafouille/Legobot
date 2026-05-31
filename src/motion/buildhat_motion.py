@@ -56,6 +56,7 @@ class BuildHatMotion:
         self.eyes = self._motor(self.eyes_port, "eyes")
 
     def perform(self, command):
+        self._ensure_ready()
         if command == "forward":
             return self.drive(self.speed, self.speed)
         elif command == "backward":
@@ -198,6 +199,15 @@ class BuildHatMotion:
             "status": self.status(),
         }
 
+    def recover_motors(self):
+        self._setup_device()
+        self._recover_motors()
+        return {
+            "ok": self.setup_error is None,
+            "message": "Moteurs rescannes",
+            "status": self.status(),
+        }
+
     def test_port(self, port, speed=45, seconds=0.35):
         port = str(port or "").strip().upper()
         if port not in {"A", "B", "C", "D"}:
@@ -299,6 +309,12 @@ class BuildHatMotion:
         self.right = self._motor(self.right_port, "right")
         self.head = self._motor(self.head_port, "head")
         self.eyes = self._motor(self.eyes_port, "eyes")
+
+    def _ensure_ready(self):
+        if self.setup_error:
+            self._setup_device()
+        if self.setup_error is None and any(motor is None for motor in (self.left, self.right, self.head, self.eyes)):
+            self._recover_motors()
 
     def _setup_device(self):
         device = os.getenv("LEGOBOT_BUILDHAT_DEVICE")

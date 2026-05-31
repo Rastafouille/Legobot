@@ -569,6 +569,7 @@ def create_app(motion, face=None):
     history_lock = threading.Lock()
     joystick_lock = threading.Lock()
     joystick_state = {"seq": 0, "timer": None}
+    mouth_hold_until = {"time": 0.0, "timer": None}
     wake_lock = threading.Lock()
     wake_state = {
         "enabled": False,
@@ -682,13 +683,31 @@ def create_app(motion, face=None):
         with history_lock:
             return list(conversation_history)
 
-    def set_face_expression(expression):
+    def set_face_expression(expression, force=False):
         if face is None:
+            return
+        if not force and expression == "sourire" and time.monotonic() < mouth_hold_until["time"]:
             return
         if hasattr(face, "set_expression"):
             face.set_expression(expression)
         else:
             face.show_expression(expression, duration=0)
+
+    def hold_mouth(seconds=4.0):
+        seconds = max(0.5, float(seconds))
+        mouth_hold_until["time"] = time.monotonic() + seconds
+        timer = mouth_hold_until.get("timer")
+        if timer:
+            timer.cancel()
+
+        def restore_smile():
+            if time.monotonic() >= mouth_hold_until["time"]:
+                set_face_expression("sourire", force=True)
+
+        timer = threading.Timer(seconds, restore_smile)
+        timer.daemon = True
+        mouth_hold_until["timer"] = timer
+        timer.start()
 
     def play_face_animation(animation, duration=0.5, speed=0.08):
         if face is None:
@@ -768,18 +787,47 @@ def create_app(motion, face=None):
             if value not in ALLOWED_MOUTH_ICONS:
                 value = "etoile"
             set_face_icon(value)
+            hold_mouth(float(mouth_output.get("duration", 4.0)))
             return {"mode": "icon", "value": value}
         if mode == "text":
             value = str(mouth_output.get("value") or "")[:24]
             if value:
                 duration = mouth_output.get("duration")
-                show_face_text(value, duration=float(duration) if duration is not None else None)
+                if len(value) == 1:
+                    display_duration = float(duration) if duration is not None else 3.0
+                    show_face_text(value)
+                    hold_mouth(display_duration)
+                else:
+                    show_face_text(value, duration=float(duration) if duration is not None else None)
             return {"mode": "text", "value": value}
         if mode == "bitmap":
             pixels = normalize_bitmap(mouth_output.get("pixels") or [])
             set_face_bitmap(pixels)
+            hold_mouth(float(mouth_output.get("duration", 4.0)))
             return {"mode": "bitmap", "pixels": pixels}
         return None
+
+    def perform_ai_motion(command):
+        command = str(command or "none").strip()
+        if command == "none":
+            return None
+
+        result = motion.perform(command)
+        if command in {"forward", "backward", "left", "right", "stop"}:
+            try:
+                motion.stop()
+            except Exception as exc:
+                result = {"ok": False, "message": f"Stop moteur apres geste IA impossible: {exc}", "previous": result}
+
+        if hasattr(motion, "status") and hasattr(motion, "recover_motors"):
+            status = motion.status()
+            if not result.get("ok", False) or status.get("motor_errors"):
+                result = {
+                    "ok": result.get("ok", False),
+                    "message": result.get("message", ""),
+                    "recovery": motion.recover_motors(),
+                }
+        return result
 
     def speak_text(text, gain_db=0, voice_model=None):
         with voice_lock:
@@ -841,7 +889,7 @@ def create_app(motion, face=None):
             model = action["model"]
             set_face_expression(action["expression"])
             if action["motion"] != "none":
-                motion_result = motion.perform(action["motion"])
+                motion_result = perform_ai_motion(action["motion"])
         else:
             answer, model, _ = ask_ollama(prompt, model, max_tokens=max_tokens)
 
@@ -1239,7 +1287,11 @@ Question utilisateur:
         duration = payload.get("duration")
         if face is None:
             return jsonify({"ok": False, "message": "Bouche LED indisponible"})
-        show_face_text(text, duration=float(duration) if duration is not None else None)
+        if len(text) == 1:
+            show_face_text(text)
+            hold_mouth(float(duration) if duration is not None else 3.0)
+        else:
+            show_face_text(text, duration=float(duration) if duration is not None else None)
         return jsonify({"ok": True, "message": f"Texte bouche: {text}", "text": text})
 
     @app.post("/api/mouth-bitmap")
@@ -1250,6 +1302,7 @@ Question utilisateur:
         try:
             pixels = normalize_bitmap(payload.get("pixels") or [])
             set_face_bitmap(pixels)
+            hold_mouth(float(payload.get("duration", 4.0)))
         except ValueError as exc:
             set_face_expression("triste")
             return jsonify({"ok": False, "message": str(exc)})
@@ -1264,6 +1317,7 @@ Question utilisateur:
         if face is None:
             return jsonify({"ok": False, "message": "Bouche LED indisponible"})
         set_face_icon(icon)
+        hold_mouth(float(payload.get("duration", 4.0)))
         return jsonify({"ok": True, "message": f"Dessin bouche: {icon}", "icon": icon})
 
     @app.post("/api/mouth-reset")
@@ -1333,7 +1387,7 @@ Question utilisateur:
                     answer = action["say"]
                     model = action["model"]
                     if action["motion"] != "none":
-                        motion_result = motion.perform(action["motion"])
+                        motion_result = perform_ai_motion(action["motion"])
                 else:
                     answer, model, _ = ask_ollama(text, model)
 
@@ -1419,7 +1473,7 @@ Question utilisateur:
                 model = action["model"]
                 set_face_expression(action["expression"])
                 if action["motion"] != "none":
-                    motion_result = motion.perform(action["motion"])
+                    motion_result = perform_ai_motion(action["motion"])
             else:
                 answer, model, ollama_url = ask_ollama(prompt, model, max_tokens=max_tokens)
             if should_speak:

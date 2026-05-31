@@ -2,6 +2,7 @@
 import os
 import threading
 import time
+import unicodedata
 
 from luma.core.interface.serial import noop, spi
 from luma.core.render import canvas
@@ -241,6 +242,9 @@ class MatrixFace:
             return
         if len(text) == 1:
             self.set_bitmap(self._char_rows(text))
+            if duration:
+                time.sleep(max(0.1, float(duration)))
+                self.set_expression("sourire")
             return
         self.scroll_text(text, duration=duration, speed=speed)
 
@@ -326,9 +330,23 @@ class MatrixFace:
         return normalized
 
     def _char_rows(self, char):
-        char = str(char or " ")[0]
+        char = self._normalize_char(str(char or " ")[0])
         glyph = FONT_5X7.get(char.upper(), FONT_5X7["?"])
         return ["........"] + [f".{row}.." for row in glyph]
+
+    def _normalize_char(self, char):
+        replacements = {
+            "œ": "o",
+            "Œ": "O",
+            "æ": "a",
+            "Æ": "A",
+            "ç": "c",
+            "Ç": "C",
+        }
+        char = replacements.get(char, char)
+        decomposed = unicodedata.normalize("NFKD", char)
+        ascii_char = "".join(part for part in decomposed if not unicodedata.combining(part))
+        return (ascii_char or char or " ")[0]
 
     def _text_columns(self, text):
         columns = []
