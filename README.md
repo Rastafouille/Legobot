@@ -155,7 +155,7 @@ LEGOBOT_MIC_DEVICE=plughw:CARD=Device,DEV=0
 LEGOBOT_MIC_RATE=16000
 LEGOBOT_VOSK_MODEL=models/vosk-model-small-fr-0.22
 LEGOBOT_WAKE_ON_START=1
-LEGOBOT_WAKE_SILENCE_SECONDS=0.45
+LEGOBOT_WAKE_SILENCE_SECONDS=0.75
 LEGOBOT_WAKE_MAX_SECONDS=5.0
 LEGOBOT_MIC_SPEECH_RMS=900
 ```
@@ -213,7 +213,7 @@ GET  /api/wake/status
 La veille ecoute en continu le mot-cle `ok briko` ou `ok brico`. Elle demarre
 par defaut avec le service web. Au repos, la
 bouche reste sur `sourire`. Quand le mot-cle est detecte, Briqo passe sur une
-bouche d'ecoute, enregistre la phrase suivante, attend environ 0,45 seconde de
+bouche d'ecoute, enregistre la phrase suivante, attend environ 0,75 seconde de
 silence, transcrit localement avec Vosk puis envoie la demande a Ollama. Le
 plafond `LEGOBOT_WAKE_MAX_SECONDS` evite une attente longue si le bruit de fond
 empeche la detection de silence. Les
@@ -329,6 +329,17 @@ La chenille droite est inversee dans le code pour compenser le montage. Les
 chenilles C/D sont pilotees en PWM pour donner plus de couple et eviter les
 commandes de vitesse trop molles du Build HAT.
 
+Calibration moteur configurable dans systemd:
+
+```text
+LEGOBOT_HEAD_DEGREES=28
+LEGOBOT_EYES_DEGREES=14
+LEGOBOT_MOTOR_SPEED=35
+```
+
+Les yeux ont une amplitude volontairement reduite pour eviter de toucher
+l'afficheur LED.
+
 ## Cablage Principal
 
 ### MAX7219
@@ -394,7 +405,7 @@ export LEGOBOT_OLLAMA_MODEL=qwen3.5:latest
 export LEGOBOT_FALLBACK_OLLAMA_URL=http://127.0.0.1:11434
 export LEGOBOT_FALLBACK_OLLAMA_MODEL=qwen2.5:1.5b
 export LEGOBOT_WAKE_ON_START=1
-export LEGOBOT_WAKE_SILENCE_SECONDS=0.45
+export LEGOBOT_WAKE_SILENCE_SECONDS=0.75
 export LEGOBOT_WAKE_MAX_SECONDS=5.0
 python3 src/web_control.py --host 0.0.0.0 --port 8080
 ```

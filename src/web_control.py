@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -22,7 +23,7 @@ DEFAULT_ROBOT_NAME = os.getenv("LEGOBOT_ROBOT_NAME", "Briqo")
 DEFAULT_VOICE_MODEL = os.getenv("LEGOBOT_VOICE_MODEL", "next")
 HISTORY_FILE = Path(os.getenv("LEGOBOT_HISTORY_FILE", "data/conversation_history.jsonl"))
 HISTORY_MAX_MESSAGES = int(os.getenv("LEGOBOT_HISTORY_MAX_MESSAGES", "24"))
-DEFAULT_WAKE_SILENCE_SECONDS = float(os.getenv("LEGOBOT_WAKE_SILENCE_SECONDS", "0.45"))
+DEFAULT_WAKE_SILENCE_SECONDS = float(os.getenv("LEGOBOT_WAKE_SILENCE_SECONDS", "0.75"))
 DEFAULT_WAKE_MAX_SECONDS = float(os.getenv("LEGOBOT_WAKE_MAX_SECONDS", "5.0"))
 DEFAULT_WAKE_ON_START = os.getenv("LEGOBOT_WAKE_ON_START", "1").strip().lower() not in {"0", "false", "no", "off"}
 
@@ -81,7 +82,8 @@ Ta famille:
 Ton role principal est educatif: tu aides les enfants a apprendre, comprendre,
 imaginer, poser des questions, et rester curieux. Tu peux expliquer les choses
 simplement, proposer de petites devinettes, raconter de courtes histoires,
-encourager les efforts, et adapter ton vocabulaire a l'age des enfants.
+encourager les efforts, et adapter ton vocabulaire a l'age des enfants. Tu dois
+donner envie d'apprendre, pas seulement repondre en une phrase.
 
 Capacites reelles:
 - Tu peux parler avec ta voix locale.
@@ -100,13 +102,20 @@ Style de reponse:
 - Reponds toujours en francais.
 - Fais des phrases courtes, naturelles et faciles a dire a voix haute.
 - Sois chaleureux, joueur, patient et rassurant.
-- Donne des reponses detaillees mais digestes: 3 a 8 phrases par defaut.
-- Si l'enfant demande une histoire ou une explication, tu peux developper un peu,
-  avec des etapes simples et des exemples.
+- Donne des reponses detaillees mais digestes: 5 a 10 phrases par defaut quand
+  on demande une histoire, une explication ou des informations sur un sujet.
+- Pour une histoire, raconte une vraie mini-histoire avec un debut, une petite
+  aventure et une fin, pas une seule phrase.
+- Pour une question de connaissance, donne 2 ou 3 idees importantes, avec un
+  exemple concret ou une image simple pour aider les enfants a comprendre.
+- Pour une commande simple comme "avance" ou "affiche A", reste bref.
 - Pour Roxane, utilise des mots tres simples.
 - Pour Juliette, tu peux ajouter un peu plus de detail.
 - Evite les longs blocs, les listes trop longues et les monologues.
-- Termine parfois par une petite question pour continuer l'echange.
+- Ne termine pas tes reponses par une question par defaut: l'interaction vocale
+  prend du temps. Termine plutot par une phrase utile, rassurante ou
+  encourageante. Pose une question seulement si l'utilisateur te demande de
+  relancer la conversation.
 
 Regles de securite et de fiabilite:
 - Ne donne pas de consigne dangereuse.
@@ -1033,7 +1042,16 @@ def create_app(motion, face=None):
         answer = (message.get("content") or body.get("response") or "").strip()
         if not answer:
             raise RuntimeError("Ollama a renvoye une reponse vide.")
-        return answer
+        return clean_answer(answer)
+
+    def clean_answer(answer):
+        answer = (answer or "").strip()
+        if not answer.endswith("?"):
+            return answer
+        sentences = re.split(r"(?<=[.!?])\s+", answer)
+        if len(sentences) <= 1:
+            return answer
+        return " ".join(sentences[:-1]).strip()
 
     def ask_ollama(prompt, model=None, max_tokens=DEFAULT_OLLAMA_MAX_TOKENS, include_history=True):
         max_tokens = max(40, min(int(max_tokens), 1200))
@@ -1045,12 +1063,15 @@ Contexte fixe a respecter:
 - Berengere est la maman.
 - Juliette a 8 ans et Roxane a 5 ans.
 - Juliette et Roxane ne sont pas tes soeurs.
-- Ton but est educatif, avec des reponses courtes pour les enfants.
+- Ton but est educatif, avec des reponses adaptees a la demande et a l'age des enfants.
+- Quand on demande une histoire, une explication ou des informations, donne une
+  reponse un peu developpee pour apprendre quelque chose aux enfants.
+- Ne finis pas par une question sauf si l'utilisateur te demande de relancer.
 
 Question:
 {prompt}
 
-Reponse courte en francais:
+Reponse en francais, claire et educative:
 """.strip()
         messages = [
             {"role": "system", "content": ASSISTANT_SYSTEM_PROMPT},
@@ -1073,7 +1094,7 @@ Reponse courte en francais:
 Tu dois repondre uniquement en JSON valide, sans markdown.
 Schema:
 {{
-  "say": "phrase courte a dire",
+  "say": "reponse a dire",
   "expression": "neutre|sourire|grand_sourire|triste|surpris|parle|coeur|colere|vague|baiser",
   "motion": "none|head_left|head_right|head_center|eyes_up|eyes_down|eyes_center|forward|backward|left|right|stop",
   "mouth": {{
@@ -1099,7 +1120,10 @@ Regles:
 - Dans pixels, utilise uniquement # pour allume et . pour eteint.
 - Exemple de bitmap valide: ["........","..####..",".#....#.",".#....#.",".#....#.","..####..","........","........"]
 - Ne reponds pas que tu ne peux pas afficher: choisis mouth.mode text ou bitmap.
-- Pour les enfants, reste doux et court.
+- Pour les enfants, reste doux et clair.
+- Si on demande une histoire ou des informations, say doit contenir plusieurs
+  phrases utiles, pas une seule phrase.
+- Ne finis pas par une question sauf si l'utilisateur te demande de relancer.
 
 Question utilisateur:
 {prompt}
@@ -1122,7 +1146,7 @@ Question utilisateur:
                 "ollama_url": used_url,
             }
 
-        say = str(data.get("say") or "").strip() or "D'accord."
+        say = clean_answer(str(data.get("say") or "").strip()) or "D'accord."
         expression = str(data.get("expression") or "sourire").strip()
         motion_command = str(data.get("motion") or "none").strip()
         if expression not in ALLOWED_AI_EXPRESSIONS:

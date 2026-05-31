@@ -40,10 +40,10 @@ class BuildHatMotion:
         self.right_port = right_port if right_port is not None else os.getenv("LEGOBOT_RIGHT_PORT", "C")
         self.head_port = head_port if head_port is not None else os.getenv("LEGOBOT_HEAD_PORT", "B")
         self.eyes_port = eyes_port if eyes_port is not None else os.getenv("LEGOBOT_EYES_PORT", "A")
-        self.speed = speed
-        self.move_seconds = move_seconds
-        self.head_degrees = head_degrees
-        self.eyes_degrees = eyes_degrees
+        self.speed = int(os.getenv("LEGOBOT_MOTOR_SPEED", speed))
+        self.move_seconds = float(os.getenv("LEGOBOT_MOVE_SECONDS", move_seconds))
+        self.head_degrees = int(os.getenv("LEGOBOT_HEAD_DEGREES", head_degrees))
+        self.eyes_degrees = int(os.getenv("LEGOBOT_EYES_DEGREES", eyes_degrees))
         self.left_sign = -1 if self._env_bool("LEGOBOT_LEFT_INVERTED", left_inverted) else 1
         self.right_sign = -1 if self._env_bool("LEGOBOT_RIGHT_INVERTED", right_inverted) else 1
         self._lock = threading.Lock()
@@ -389,6 +389,12 @@ class BuildHatMotion:
             "inverted": {
                 "left": self.left_sign == -1,
                 "right": self.right_sign == -1,
+            },
+            "calibration": {
+                "speed": self.speed,
+                "move_seconds": self.move_seconds,
+                "head_degrees": self.head_degrees,
+                "eyes_degrees": self.eyes_degrees,
             },
             "motor_errors": dict(self.motor_errors),
         }
