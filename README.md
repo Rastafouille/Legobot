@@ -16,7 +16,7 @@ sur sa bouche LED, bouger la tete, les yeux et les chenilles.
 - Ollama principal sur le PC du reseau: `http://192.168.1.12:11434`
 - Modele principal: `qwen3.5:latest`
 - Fallback local sur la Raspberry Pi: `qwen2.5:1.5b`
-- Voix locale avec Piper et le modele `fr_FR-gilles-low.onnx`
+- Voix locale avec Piper, par defaut sur le modele `next`
 - Selecteur de voix Piper base sur les fichiers `.onnx` presents dans `src/audio`
 - Bouche LED MAX7219 avec expressions et animations
 - Historique de conversation persistant dans `data/conversation_history.jsonl`
@@ -57,6 +57,9 @@ L'interface permet de:
 - redemarrer le service moteur si le Build HAT devient muet
 - faire parler Briqo
 - choisir une voix Piper
+- ecouter le micro USB et transcrire en local
+- envoyer la transcription directement a l'assistant
+- lancer une veille vocale avec le mot-cle `ok briko`
 - envoyer une question a l'assistant
 - autoriser ou non les gestes simples de l'IA
 - effacer l'historique de conversation
@@ -142,6 +145,75 @@ LEGOBOT_HISTORY_FILE=data/conversation_history.jsonl
 LEGOBOT_HISTORY_MAX_MESSAGES=24
 LEGOBOT_OLLAMA_MAX_TOKENS=520
 ```
+
+## Micro Et Speech-To-Text
+
+Le micro USB est utilise via ALSA. Par defaut:
+
+```text
+LEGOBOT_MIC_DEVICE=plughw:CARD=Device,DEV=0
+LEGOBOT_MIC_RATE=16000
+LEGOBOT_VOSK_MODEL=models/vosk-model-small-fr-0.22
+LEGOBOT_WAKE_ON_START=1
+LEGOBOT_WAKE_SILENCE_SECONDS=0.55
+```
+
+Le modele local installe sur la Raspberry est:
+
+```text
+models/vosk-model-small-fr-0.22
+```
+
+Installation du moteur STT et du modele Vosk:
+
+```bash
+cd ~/Legobot
+python3 -m pip install --break-system-packages vosk
+mkdir -p models
+wget https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip -O /tmp/vosk-fr.zip
+unzip /tmp/vosk-fr.zip -d models
+```
+
+Endpoints:
+
+```text
+POST /api/listen
+```
+
+Exemple transcription seule:
+
+```json
+{
+  "duration": 4,
+  "ask": false
+}
+```
+
+Exemple transcription puis reponse de Briqo:
+
+```json
+{
+  "duration": 4,
+  "ask": true,
+  "speak": true,
+  "allow_actions": true
+}
+```
+
+Veille vocale:
+
+```text
+POST /api/wake/start
+POST /api/wake/stop
+GET  /api/wake/status
+```
+
+La veille ecoute en continu le mot-cle `ok briko` ou `ok brico`. Elle demarre
+par defaut avec le service web. Au repos, la
+bouche reste sur `sourire`. Quand le mot-cle est detecte, Briqo passe sur une
+bouche d'ecoute, enregistre la phrase suivante, attend environ 0,55 seconde de
+silence, transcrit localement avec Vosk puis envoie la demande a Ollama. Les
+gestes simples sont actives par defaut dans l'interface.
 
 ## Gestes IA
 
@@ -237,7 +309,7 @@ Apres un defilement de texte, la bouche revient automatiquement sur `sourire`.
 - 4 moteurs LEGO Technic
 - Matrice LED 8x8 MAX7219 pour la bouche
 - Amplificateur MAX98357A I2S + haut-parleur
-- Micro USB prevu pour la future reconnaissance vocale
+- Micro USB pour la reconnaissance vocale locale
 - Alimentation separee pour le Build HAT et les moteurs
 
 ## Ports Moteurs
@@ -304,6 +376,40 @@ Ollama local de secours:
 ollama pull qwen2.5:1.5b
 ```
 
+## Demarrage Manuel
+
+Sur la Raspberry Pi:
+
+```bash
+cd ~/Legobot
+export PYTHONPATH=$PWD/src
+export LEGOBOT_ROBOT_NAME=Briqo
+export LEGOBOT_VOICE_MODEL=next
+export LEGOBOT_OLLAMA_URL=http://192.168.1.12:11434
+export LEGOBOT_OLLAMA_MODEL=qwen3.5:latest
+export LEGOBOT_FALLBACK_OLLAMA_URL=http://127.0.0.1:11434
+export LEGOBOT_FALLBACK_OLLAMA_MODEL=qwen2.5:1.5b
+export LEGOBOT_WAKE_ON_START=1
+export LEGOBOT_WAKE_SILENCE_SECONDS=0.55
+python3 src/web_control.py --host 0.0.0.0 --port 8080
+```
+
+L'interface est ensuite disponible depuis le reseau local:
+
+```text
+http://192.168.1.62:8080
+```
+
+Pour tester rapidement les briques sans navigateur:
+
+```bash
+curl http://127.0.0.1:8080/api/status
+curl http://127.0.0.1:8080/api/wake/status
+curl -X POST http://127.0.0.1:8080/api/mouth \
+  -H 'Content-Type: application/json' \
+  -d '{"expression":"sourire"}'
+```
+
 ## Service Au Demarrage
 
 Le service est versionne dans:
@@ -317,8 +423,7 @@ Installation sur la Raspberry:
 ```bash
 sudo install -m 0644 deploy/legobot-web.service /etc/systemd/system/legobot-web.service
 sudo systemctl daemon-reload
-sudo systemctl enable legobot-web.service
-sudo systemctl restart legobot-web.service
+sudo systemctl enable --now legobot-web.service
 ```
 
 Verification:
@@ -336,6 +441,10 @@ GET  /api/status
 POST /api/ask
 POST /api/say
 GET  /api/voices
+POST /api/listen
+POST /api/wake/start
+POST /api/wake/stop
+GET  /api/wake/status
 POST /api/mouth
 POST /api/mouth-animation
 POST /api/mouth-text
@@ -362,4 +471,5 @@ POST /api/history/clear
   qu'un reset a chaud, mais plus fiable quand le thread serie Build HAT se bloque.
 - Le volume Piper peut clipper si le gain est trop haut. Un gain entre 2 et 4 est
   generalement plus propre que 18.
-- Le micro USB est la prochaine etape pour ajouter speech-to-text local.
+- Les gros fichiers locaux ne sont pas versionnes: historique `data/`, WAV
+  temporaires, caches Python et modeles Vosk dans `models/`.

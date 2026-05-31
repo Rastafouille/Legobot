@@ -306,12 +306,16 @@ class BuildHatMotion:
             if device:
                 self.Device._setup(device=device)
             elif not os.path.exists("/dev/serial0") and os.path.exists("/dev/ttyAMA0"):
+                # Raspberry Pi 5: selon la configuration serie, le Build HAT
+                # apparait parfois ici plutot que via /dev/serial0.
                 self.Device._setup(device="/dev/ttyAMA0")
             self.setup_error = None
         except Exception as exc:
             self.setup_error = str(exc)
 
     def _start_tracks(self, hardware_left_speed, hardware_right_speed):
+        # Les chenilles repondent mieux en PWM direct qu'avec start(speed).
+        # Les signes sont deja corriges avant d'arriver ici.
         with self._lock:
             try:
                 self.left.pwm(max(-1.0, min(1.0, hardware_left_speed / 100.0)))
@@ -374,6 +378,8 @@ class BuildHatMotion:
         }
 
     def _release_reset_pin(self):
+        # Libere puis relance la broche reset du Build HAT. Cela recupere
+        # souvent un HAT alimente mais muet apres un redemarrage.
         commands = [
             ["pinctrl", "set", "22", "op", "dl"],
             ["pinctrl", "set", "4", "op", "dl"],

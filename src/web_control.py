@@ -22,6 +22,8 @@ DEFAULT_ROBOT_NAME = os.getenv("LEGOBOT_ROBOT_NAME", "Briqo")
 DEFAULT_VOICE_MODEL = os.getenv("LEGOBOT_VOICE_MODEL", "next")
 HISTORY_FILE = Path(os.getenv("LEGOBOT_HISTORY_FILE", "data/conversation_history.jsonl"))
 HISTORY_MAX_MESSAGES = int(os.getenv("LEGOBOT_HISTORY_MAX_MESSAGES", "24"))
+DEFAULT_WAKE_SILENCE_SECONDS = float(os.getenv("LEGOBOT_WAKE_SILENCE_SECONDS", "0.55"))
+DEFAULT_WAKE_ON_START = os.getenv("LEGOBOT_WAKE_ON_START", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 ALLOWED_AI_MOTIONS = {
     "none",
@@ -122,6 +124,7 @@ HTML = """
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <title>LegoBot Control</title>
   <style>
     :root { color-scheme: dark; font-family: Arial, sans-serif; }
@@ -271,9 +274,21 @@ HTML = """
         <input id="assistantModel" type="text" value="qwen3.5:latest">
         <label for="assistantMaxTokens">Longueur reponse: <span id="assistantMaxTokensValue">520</span></label>
         <input id="assistantMaxTokens" type="range" min="120" max="1200" step="20" value="520">
-        <label><input id="assistantActions" type="checkbox"> Autoriser gestes simples</label>
+        <label><input id="assistantActions" type="checkbox" checked> Autoriser gestes simples</label>
         <button id="historyClearButton" class="secondary">Effacer historique</button>
         <button id="askButton" class="secondary">Demander</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Micro</h2>
+      <div class="axis">
+        <label for="listenDuration">Duree ecoute: <span id="listenDurationValue">4</span>s</label>
+        <input id="listenDuration" type="range" min="2" max="10" step="1" value="4">
+        <button id="listenButton" class="secondary">Ecouter</button>
+        <button id="listenAskButton" class="secondary">Ecouter + demander</button>
+        <button id="wakeStartButton" class="secondary">Veille ok briko</button>
+        <button id="wakeStopButton" class="secondary">Stop veille</button>
       </div>
     </section>
 
@@ -320,6 +335,12 @@ HTML = """
     const assistantActions = document.querySelector("#assistantActions");
     const historyClearButton = document.querySelector("#historyClearButton");
     const askButton = document.querySelector("#askButton");
+    const listenDuration = document.querySelector("#listenDuration");
+    const listenDurationValue = document.querySelector("#listenDurationValue");
+    const listenButton = document.querySelector("#listenButton");
+    const listenAskButton = document.querySelector("#listenAskButton");
+    const wakeStartButton = document.querySelector("#wakeStartButton");
+    const wakeStopButton = document.querySelector("#wakeStopButton");
     const speedValue = document.querySelector("#speedValue");
     const secondsValue = document.querySelector("#secondsValue");
     const headPositionValue = document.querySelector("#headPositionValue");
@@ -334,6 +355,7 @@ HTML = """
     seconds.addEventListener("input", () => secondsValue.textContent = seconds.value);
     voiceGain.addEventListener("input", () => voiceGainValue.textContent = voiceGain.value);
     assistantMaxTokens.addEventListener("input", () => assistantMaxTokensValue.textContent = assistantMaxTokens.value);
+    listenDuration.addEventListener("input", () => listenDurationValue.textContent = listenDuration.value);
 
     async function post(url, body = {}) {
       status.textContent = "Envoi...";
@@ -500,6 +522,31 @@ HTML = """
       allow_actions: assistantActions.checked,
     }));
 
+    listenButton.addEventListener("click", () => post("/api/listen", {
+      duration: Number(listenDuration.value),
+      ask: false,
+    }));
+
+    listenAskButton.addEventListener("click", () => post("/api/listen", {
+      duration: Number(listenDuration.value),
+      ask: true,
+      model: assistantModel.value,
+      gain_db: Number(voiceGain.value),
+      voice_model: voiceModel.value,
+      speak: true,
+      allow_actions: assistantActions.checked,
+    }));
+
+    wakeStartButton.addEventListener("click", () => post("/api/wake/start", {
+      model: assistantModel.value,
+      gain_db: Number(voiceGain.value),
+      voice_model: voiceModel.value,
+      speak: true,
+      allow_actions: assistantActions.checked,
+    }));
+
+    wakeStopButton.addEventListener("click", () => post("/api/wake/stop"));
+
     document.querySelector("[data-stop]").addEventListener("click", () => post("/api/stop", { seq: ++joystickSeq }));
 
     fetch("/api/status")
@@ -516,10 +563,23 @@ HTML = """
 def create_app(motion, face=None):
     app = Flask(__name__)
     voice_holder = {"voice": None}
+    stt_holder = {"stt": None}
     voice_lock = threading.Lock()
+    stt_lock = threading.Lock()
     history_lock = threading.Lock()
     joystick_lock = threading.Lock()
     joystick_state = {"seq": 0, "timer": None}
+    wake_lock = threading.Lock()
+    wake_state = {
+        "enabled": False,
+        "status": "stopped",
+        "last_wake": "",
+        "last_text": "",
+        "last_response": "",
+        "last_error": "",
+        "thread": None,
+        "config": {},
+    }
     conversation_history = deque(maxlen=HISTORY_MAX_MESSAGES)
 
     def cancel_joystick_timer():
@@ -529,6 +589,8 @@ def create_app(motion, face=None):
             joystick_state["timer"] = None
 
     def schedule_joystick_timeout(seq, delay=0.45):
+        # Le joystick envoie des commandes en continu. Ce timer coupe les
+        # chenilles si le navigateur cesse d'envoyer des paquets.
         def timeout_stop():
             with joystick_lock:
                 if seq != joystick_state["seq"]:
@@ -544,6 +606,34 @@ def create_app(motion, face=None):
         timer.daemon = True
         joystick_state["timer"] = timer
         timer.start()
+
+    def default_wake_config(overrides=None):
+        # Configuration centralisee: l'UI et le demarrage systemd utilisent le
+        # meme comportement par defaut pour la veille vocale.
+        config = {
+            "model": DEFAULT_OLLAMA_MODEL,
+            "gain_db": 0,
+            "voice_model": DEFAULT_VOICE_MODEL,
+            "speak": True,
+            "allow_actions": True,
+            "silence_seconds": DEFAULT_WAKE_SILENCE_SECONDS,
+            "max_seconds": 10.0,
+            "wake_words": ["ok briko", "ok brico", "okay briko", "okay brico"],
+        }
+        if overrides:
+            config.update(overrides)
+        return config
+
+    def start_wake_thread(config=None):
+        with wake_lock:
+            wake_state["enabled"] = True
+            wake_state["status"] = "starting"
+            wake_state["config"] = default_wake_config(config)
+            thread = wake_state.get("thread")
+            if thread is None or not thread.is_alive():
+                thread = threading.Thread(target=wake_loop, daemon=True)
+                wake_state["thread"] = thread
+                thread.start()
 
     def load_history():
         if not HISTORY_FILE.exists():
@@ -722,7 +812,145 @@ def create_app(motion, face=None):
                 animation_thread.join(timeout=1)
                 set_face_expression("sourire")
 
+    def listen_text(duration=4):
+        with stt_lock:
+            set_face_expression("charge")
+            if stt_holder["stt"] is None:
+                from audio.speech_to_text import SpeechToText
+
+                stt_holder["stt"] = SpeechToText()
+            try:
+                return stt_holder["stt"].transcribe(duration=duration)
+            finally:
+                set_face_expression("sourire")
+
+    def get_stt():
+        if stt_holder["stt"] is None:
+            from audio.speech_to_text import SpeechToText
+
+            stt_holder["stt"] = SpeechToText()
+        return stt_holder["stt"]
+
+    def answer_prompt(prompt, model, max_tokens=DEFAULT_OLLAMA_MAX_TOKENS, gain_db=0, voice_model=None, should_speak=True, allow_actions=True):
+        action = None
+        mouth_result = None
+        motion_result = None
+        if allow_actions:
+            action = ask_ollama_action(prompt, model=model, max_tokens=max_tokens)
+            answer = action["say"]
+            model = action["model"]
+            set_face_expression(action["expression"])
+            if action["motion"] != "none":
+                motion_result = motion.perform(action["motion"])
+        else:
+            answer, model, _ = ask_ollama(prompt, model, max_tokens=max_tokens)
+
+        if should_speak:
+            speak_text(answer, gain_db=gain_db, voice_model=voice_model)
+
+        if action:
+            mouth_result = apply_mouth_output(action.get("mouth"))
+            if not mouth_result:
+                set_face_expression(action["expression"])
+        else:
+            set_face_expression("sourire")
+
+        append_history("user", prompt)
+        append_history("assistant", answer)
+        return {
+            "response": answer,
+            "model": model,
+            "action": action,
+            "mouth_result": mouth_result,
+            "motion_result": motion_result,
+        }
+
+    def wake_event(event, value):
+        with wake_lock:
+            wake_state["status"] = event
+            if event == "wake":
+                wake_state["last_wake"] = value
+        if event == "idle":
+            set_face_expression("sourire")
+        elif event == "wake":
+            set_face_expression("surpris")
+        elif event == "speech":
+            set_face_expression("vague")
+
+    def wake_loop():
+        # Boucle longue vie: elle dort dans arecord/Vosk, puis sort rapidement
+        # quand /api/wake/stop bascule wake_state["enabled"].
+        while True:
+            with wake_lock:
+                if not wake_state["enabled"]:
+                    wake_state["status"] = "stopped"
+                    set_face_expression("sourire")
+                    return
+                config = dict(wake_state["config"])
+                wake_state["status"] = "idle"
+                wake_state["last_error"] = ""
+
+            try:
+                with stt_lock:
+                    text = get_stt().listen_after_wake(
+                        wake_words=config.get("wake_words") or ["ok briko", "ok brico", "okay briko", "okay brico"],
+                        silence_seconds=float(config.get("silence_seconds", DEFAULT_WAKE_SILENCE_SECONDS)),
+                        max_seconds=float(config.get("max_seconds", 10.0)),
+                        on_event=wake_event,
+                        should_stop=lambda: not wake_state["enabled"],
+                    )
+                text = (text or "").strip()
+                with wake_lock:
+                    if not wake_state["enabled"]:
+                        wake_state["status"] = "stopped"
+                        set_face_expression("sourire")
+                        return
+                with wake_lock:
+                    wake_state["last_text"] = text
+                    wake_state["status"] = "processing"
+                if not text:
+                    set_face_expression("triste")
+                    time.sleep(0.4)
+                    set_face_expression("sourire")
+                    continue
+
+                set_face_expression("charge")
+                result = answer_prompt(
+                    text,
+                    model=config.get("model") or DEFAULT_OLLAMA_MODEL,
+                    gain_db=config.get("gain_db", 0),
+                    voice_model=config.get("voice_model"),
+                    should_speak=bool(config.get("speak", True)),
+                    allow_actions=bool(config.get("allow_actions", True)),
+                )
+                with wake_lock:
+                    wake_state["last_response"] = result["response"]
+            except Exception as exc:
+                with wake_lock:
+                    wake_state["last_error"] = str(exc)
+                    wake_state["status"] = "error"
+                set_face_expression("triste")
+                time.sleep(1)
+
+    def public_wake_state():
+        with wake_lock:
+            return {
+                "enabled": wake_state["enabled"],
+                "status": wake_state["status"],
+                "last_wake": wake_state["last_wake"],
+                "last_text": wake_state["last_text"],
+                "last_response": wake_state["last_response"],
+                "last_error": wake_state["last_error"],
+                "config": {
+                    key: value
+                    for key, value in wake_state.get("config", {}).items()
+                    if key != "voice_model"
+                },
+            }
+
     def ollama_candidates(model=None):
+        # On tente d'abord le PC du reseau, puis Ollama local sur la Raspberry
+        # pour garder Briqo utilisable si le PC est eteint.
         requested_model = (model or DEFAULT_OLLAMA_MODEL).strip()
         candidates = [(DEFAULT_OLLAMA_URL, requested_model)]
         fallback = (FALLBACK_OLLAMA_URL, FALLBACK_OLLAMA_MODEL)
@@ -1077,6 +1305,96 @@ Question utilisateur:
             "voice_model": voice_model,
         })
 
+    @app.post("/api/listen")
+    def listen():
+        payload = request.get_json(silent=True) or {}
+        duration = payload.get("duration", 4)
+        ask_robot = bool(payload.get("ask", False))
+        speak = bool(payload.get("speak", True))
+        allow_actions = bool(payload.get("allow_actions", False))
+        model = (payload.get("model") or DEFAULT_OLLAMA_MODEL).strip()
+        gain_db = payload.get("gain_db", 0)
+        voice_model = (payload.get("voice_model") or "").strip() or None
+
+        try:
+            text = listen_text(duration=duration)
+            if not text:
+                set_face_expression("triste")
+                return jsonify({"ok": False, "message": "Aucune parole detectee", "text": ""})
+
+            answer = None
+            action = None
+            mouth_result = None
+            motion_result = None
+            if ask_robot:
+                set_face_expression("charge")
+                if allow_actions:
+                    action = ask_ollama_action(text, model=model)
+                    answer = action["say"]
+                    model = action["model"]
+                    if action["motion"] != "none":
+                        motion_result = motion.perform(action["motion"])
+                else:
+                    answer, model, _ = ask_ollama(text, model)
+
+                if speak:
+                    speak_text(answer, gain_db=gain_db, voice_model=voice_model)
+                if action:
+                    mouth_result = apply_mouth_output(action.get("mouth"))
+                    if not mouth_result:
+                        set_face_expression(action["expression"])
+                else:
+                    set_face_expression("sourire")
+                append_history("user", text)
+                append_history("assistant", answer)
+            else:
+                set_face_expression("sourire")
+
+        except Exception as exc:
+            set_face_expression("triste")
+            return jsonify({"ok": False, "message": str(exc)})
+
+        return jsonify({
+            "ok": True,
+            "message": "Ecoute terminee",
+            "text": text,
+            "asked": ask_robot,
+            "response": answer,
+            "model": model,
+            "spoken": speak if ask_robot else False,
+            "action": action,
+            "mouth_result": mouth_result,
+            "motion_result": motion_result,
+        })
+
+    @app.post("/api/wake/start")
+    def wake_start():
+        payload = request.get_json(silent=True) or {}
+        start_wake_thread({
+            "model": (payload.get("model") or DEFAULT_OLLAMA_MODEL).strip(),
+            "gain_db": payload.get("gain_db", 0),
+            "voice_model": (payload.get("voice_model") or "").strip() or DEFAULT_VOICE_MODEL,
+            "speak": bool(payload.get("speak", True)),
+            "allow_actions": bool(payload.get("allow_actions", True)),
+            "silence_seconds": float(payload.get("silence_seconds", DEFAULT_WAKE_SILENCE_SECONDS)),
+            "max_seconds": float(payload.get("max_seconds", 10.0)),
+            "wake_words": payload.get("wake_words") or ["ok briko", "ok brico", "okay briko", "okay brico"],
+        })
+        set_face_expression("sourire")
+        return jsonify({"ok": True, "message": "Veille ok briko activee", "wake": public_wake_state()})
+
+    @app.post("/api/wake/stop")
+    def wake_stop():
+        with wake_lock:
+            wake_state["enabled"] = False
+            wake_state["status"] = "stopping"
+        set_face_expression("sourire")
+        return jsonify({"ok": True, "message": "Veille ok briko arretee", "wake": public_wake_state()})
+
+    @app.get("/api/wake/status")
+    def wake_status():
+        return jsonify({"ok": True, "wake": public_wake_state()})
+
     @app.post("/api/ask")
     def ask():
         payload = request.get_json(silent=True) or {}
@@ -1161,6 +1479,7 @@ Question utilisateur:
             state["ollama_url"] = DEFAULT_OLLAMA_URL
             state["fallback_ollama_model"] = FALLBACK_OLLAMA_MODEL
             state["fallback_ollama_url"] = FALLBACK_OLLAMA_URL
+            state["wake"] = public_wake_state()
             return jsonify(state)
         return jsonify({
             "ok": True,
@@ -1170,10 +1489,13 @@ Question utilisateur:
             "ollama_url": DEFAULT_OLLAMA_URL,
             "fallback_ollama_model": FALLBACK_OLLAMA_MODEL,
             "fallback_ollama_url": FALLBACK_OLLAMA_URL,
+            "wake": public_wake_state(),
         })
 
     load_history()
     threading.Thread(target=warm_ollama, daemon=True).start()
+    if DEFAULT_WAKE_ON_START:
+        start_wake_thread()
     return app
 
 
