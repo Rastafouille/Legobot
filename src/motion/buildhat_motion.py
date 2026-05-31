@@ -44,6 +44,10 @@ class BuildHatMotion:
         self.move_seconds = float(os.getenv("LEGOBOT_MOVE_SECONDS", move_seconds))
         self.head_degrees = int(os.getenv("LEGOBOT_HEAD_DEGREES", head_degrees))
         self.eyes_degrees = int(os.getenv("LEGOBOT_EYES_DEGREES", eyes_degrees))
+        self.head_min = int(os.getenv("LEGOBOT_HEAD_MIN", "-90"))
+        self.head_max = int(os.getenv("LEGOBOT_HEAD_MAX", "90"))
+        self.eyes_min = int(os.getenv("LEGOBOT_EYES_MIN", "-45"))
+        self.eyes_max = int(os.getenv("LEGOBOT_EYES_MAX", "45"))
         self.track_mode = os.getenv("LEGOBOT_TRACK_MODE", "start").strip().lower()
         self.left_sign = -1 if self._env_bool("LEGOBOT_LEFT_INVERTED", left_inverted) else 1
         self.right_sign = -1 if self._env_bool("LEGOBOT_RIGHT_INVERTED", right_inverted) else 1
@@ -136,7 +140,7 @@ class BuildHatMotion:
             return {"ok": False, "message": "Moteur de tete indisponible"}
 
         run_speed = self.speed if speed is None else abs(int(speed))
-        position = max(-90, min(90, int(position)))
+        position = max(self.head_min, min(self.head_max, int(position)))
         self._pulse_motor(self.head, position, run_speed, max_seconds=0.7)
         return {"ok": True, "message": f"Tete position {position}", "position": position}
 
@@ -160,9 +164,24 @@ class BuildHatMotion:
             return {"ok": False, "message": "Moteur des yeux indisponible"}
 
         run_speed = self.speed if speed is None else abs(int(speed))
-        position = max(-45, min(45, int(position)))
+        position = max(self.eyes_min, min(self.eyes_max, int(position)))
         self._pulse_motor(self.eyes, position, run_speed, max_seconds=0.45)
         return {"ok": True, "message": f"Yeux position {position}", "position": position}
+
+    def set_limits(self, head_min=None, head_max=None, eyes_min=None, eyes_max=None):
+        if head_min is not None:
+            self.head_min = int(head_min)
+        if head_max is not None:
+            self.head_max = int(head_max)
+        if eyes_min is not None:
+            self.eyes_min = int(eyes_min)
+        if eyes_max is not None:
+            self.eyes_max = int(eyes_max)
+        if self.head_min > self.head_max:
+            self.head_min, self.head_max = self.head_max, self.head_min
+        if self.eyes_min > self.eyes_max:
+            self.eyes_min, self.eyes_max = self.eyes_max, self.eyes_min
+        return {"ok": True, "message": "Limites moteur mises a jour", "calibration": self.calibration()}
 
     def stop(self):
         with self._lock:
@@ -399,14 +418,21 @@ class BuildHatMotion:
                 "left": self.left_sign == -1,
                 "right": self.right_sign == -1,
             },
-            "calibration": {
-                "speed": self.speed,
-                "move_seconds": self.move_seconds,
-                "head_degrees": self.head_degrees,
-                "eyes_degrees": self.eyes_degrees,
-                "track_mode": self.track_mode,
-            },
+            "calibration": self.calibration(),
             "motor_errors": dict(self.motor_errors),
+        }
+
+    def calibration(self):
+        return {
+            "speed": self.speed,
+            "move_seconds": self.move_seconds,
+            "head_degrees": self.head_degrees,
+            "eyes_degrees": self.eyes_degrees,
+            "head_min": self.head_min,
+            "head_max": self.head_max,
+            "eyes_min": self.eyes_min,
+            "eyes_max": self.eyes_max,
+            "track_mode": self.track_mode,
         }
 
     def _release_reset_pin(self):

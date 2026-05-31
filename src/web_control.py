@@ -22,6 +22,7 @@ DEFAULT_OLLAMA_MAX_TOKENS = int(os.getenv("LEGOBOT_OLLAMA_MAX_TOKENS", "520"))
 DEFAULT_ROBOT_NAME = os.getenv("LEGOBOT_ROBOT_NAME", "Briqo")
 DEFAULT_VOICE_MODEL = os.getenv("LEGOBOT_VOICE_MODEL", "next")
 HISTORY_FILE = Path(os.getenv("LEGOBOT_HISTORY_FILE", "data/conversation_history.jsonl"))
+CALIBRATION_FILE = Path(os.getenv("LEGOBOT_CALIBRATION_FILE", "data/motor_calibration.json"))
 HISTORY_MAX_MESSAGES = int(os.getenv("LEGOBOT_HISTORY_MAX_MESSAGES", "24"))
 DEFAULT_WAKE_SILENCE_SECONDS = float(os.getenv("LEGOBOT_WAKE_SILENCE_SECONDS", "0.75"))
 DEFAULT_WAKE_MAX_SECONDS = float(os.getenv("LEGOBOT_WAKE_MAX_SECONDS", "5.0"))
@@ -190,6 +191,10 @@ HTML = """
       <div class="axis">
         <label for="headPosition">Position tete: <span id="headPositionValue">0</span></label>
         <input id="headPosition" type="range" min="-90" max="90" value="0">
+        <label for="headMin">Min tete</label>
+        <input id="headMin" type="number" min="-180" max="180" value="-90">
+        <label for="headMax">Max tete</label>
+        <input id="headMax" type="number" min="-180" max="180" value="90">
       </div>
     </section>
 
@@ -203,6 +208,11 @@ HTML = """
       <div class="axis">
         <label for="eyesPosition">Position yeux: <span id="eyesPositionValue">0</span></label>
         <input id="eyesPosition" type="range" min="-45" max="45" value="0">
+        <label for="eyesMin">Min yeux</label>
+        <input id="eyesMin" type="number" min="-90" max="90" value="-45">
+        <label for="eyesMax">Max yeux</label>
+        <input id="eyesMax" type="number" min="-90" max="90" value="45">
+        <button id="calibrationSaveButton" class="secondary">Sauver limites tete/yeux</button>
       </div>
     </section>
 
@@ -323,6 +333,11 @@ HTML = """
     const stick = document.querySelector("#stick");
     const headPosition = document.querySelector("#headPosition");
     const eyesPosition = document.querySelector("#eyesPosition");
+    const headMin = document.querySelector("#headMin");
+    const headMax = document.querySelector("#headMax");
+    const eyesMin = document.querySelector("#eyesMin");
+    const eyesMax = document.querySelector("#eyesMax");
+    const calibrationSaveButton = document.querySelector("#calibrationSaveButton");
     const mouthExpression = document.querySelector("#mouthExpression");
     const mouthAnimation = document.querySelector("#mouthAnimation");
     const mouthText = document.querySelector("#mouthText");
@@ -401,6 +416,25 @@ HTML = """
         });
       } catch (error) {
         console.warn("Voix indisponibles", error);
+      }
+    }
+
+    function applyCalibration(calibration = {}) {
+      if (calibration.head_min !== undefined) {
+        headMin.value = calibration.head_min;
+        headPosition.min = calibration.head_min;
+      }
+      if (calibration.head_max !== undefined) {
+        headMax.value = calibration.head_max;
+        headPosition.max = calibration.head_max;
+      }
+      if (calibration.eyes_min !== undefined) {
+        eyesMin.value = calibration.eyes_min;
+        eyesPosition.min = calibration.eyes_min;
+      }
+      if (calibration.eyes_max !== undefined) {
+        eyesMax.value = calibration.eyes_max;
+        eyesPosition.max = calibration.eyes_max;
       }
     }
 
@@ -493,6 +527,17 @@ HTML = """
       speed: Number(speed.value),
     }));
 
+    calibrationSaveButton.addEventListener("click", () => {
+      const calibration = {
+        head_min: Number(headMin.value),
+        head_max: Number(headMax.value),
+        eyes_min: Number(eyesMin.value),
+        eyes_max: Number(eyesMax.value),
+      };
+      applyCalibration(calibration);
+      post("/api/calibration", calibration);
+    });
+
     mouthExpression.addEventListener("change", () => post("/api/mouth", {
       expression: mouthExpression.value,
     }));
@@ -561,7 +606,10 @@ HTML = """
 
     fetch("/api/status")
       .then((res) => res.json())
-      .then((data) => { status.textContent = JSON.stringify(data, null, 2); })
+      .then((data) => {
+        if (data.calibration) applyCalibration(data.calibration);
+        status.textContent = JSON.stringify(data, null, 2);
+      })
       .catch(() => { status.textContent = "Etat indisponible"; });
     loadVoices();
   </script>
@@ -688,6 +736,27 @@ def create_app(motion, face=None):
                 HISTORY_FILE.write_text("", encoding="utf-8")
             except OSError as exc:
                 print(f"Reset historique impossible: {exc}", flush=True)
+
+    def load_motor_calibration():
+        if not hasattr(motion, "set_limits") or not CALIBRATION_FILE.exists():
+            return
+        try:
+            data = json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
+            motion.set_limits(
+                head_min=data.get("head_min"),
+                head_max=data.get("head_max"),
+                eyes_min=data.get("eyes_min"),
+                eyes_max=data.get("eyes_max"),
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"Calibration moteur ignoree: {exc}", flush=True)
+
+    def save_motor_calibration(calibration):
+        try:
+            CALIBRATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CALIBRATION_FILE.write_text(json.dumps(calibration, ensure_ascii=False) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"Calibration moteur non sauvegardee: {exc}", flush=True)
 
     def history_messages():
         with history_lock:
@@ -1244,6 +1313,21 @@ Question utilisateur:
         )
         return jsonify(result)
 
+    @app.post("/api/calibration")
+    def calibration():
+        payload = request.get_json(silent=True) or {}
+        if not hasattr(motion, "set_limits"):
+            return jsonify({"ok": False, "message": "Calibration indisponible"})
+        result = motion.set_limits(
+            head_min=payload.get("head_min"),
+            head_max=payload.get("head_max"),
+            eyes_min=payload.get("eyes_min"),
+            eyes_max=payload.get("eyes_max"),
+        )
+        if result.get("ok"):
+            save_motor_calibration(result["calibration"])
+        return jsonify(result)
+
     @app.post("/api/stop")
     def stop():
         payload = request.get_json(silent=True) or {}
@@ -1572,6 +1656,7 @@ Question utilisateur:
         })
 
     load_history()
+    load_motor_calibration()
     threading.Thread(target=warm_ollama, daemon=True).start()
     if DEFAULT_WAKE_ON_START:
         start_wake_thread()

@@ -334,12 +334,21 @@ Calibration moteur configurable dans systemd:
 ```text
 LEGOBOT_HEAD_DEGREES=28
 LEGOBOT_EYES_DEGREES=14
+LEGOBOT_HEAD_MIN=-90
+LEGOBOT_HEAD_MAX=90
+LEGOBOT_EYES_MIN=-45
+LEGOBOT_EYES_MAX=45
 LEGOBOT_MOTOR_SPEED=45
 LEGOBOT_TRACK_MODE=start
 ```
 
 Les yeux ont une amplitude volontairement reduite pour eviter de toucher
-l'afficheur LED.
+l'afficheur LED. L'interface web permet aussi de regler les limites min/max de
+la tete et des yeux a chaud. Ces limites sont sauvegardees dans:
+
+```text
+data/motor_calibration.json
+```
 
 ## Cablage Principal
 
@@ -470,6 +479,7 @@ POST /api/mouth-icon
 POST /api/mouth-reset
 POST /api/head
 POST /api/eyes
+POST /api/calibration
 POST /api/joystick
 POST /api/stop
 POST /api/motors-reset
