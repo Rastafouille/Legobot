@@ -23,7 +23,8 @@ Environment=LEGOBOT_WAKE_MAX_SECONDS=5.0
 Environment=LEGOBOT_MIC_SPEECH_RMS=900
 Environment=LEGOBOT_HEAD_DEGREES=28
 Environment=LEGOBOT_EYES_DEGREES=14
-Environment=LEGOBOT_MOTOR_SPEED=35
+Environment=LEGOBOT_MOTOR_SPEED=45
+Environment=LEGOBOT_TRACK_MODE=start
 ExecStart=/usr/bin/python3 /home/jerem/Legobot/src/web_control.py --host 0.0.0.0 --port 8080
 Restart=always
 RestartSec=3

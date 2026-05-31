@@ -334,7 +334,8 @@ Calibration moteur configurable dans systemd:
 ```text
 LEGOBOT_HEAD_DEGREES=28
 LEGOBOT_EYES_DEGREES=14
-LEGOBOT_MOTOR_SPEED=35
+LEGOBOT_MOTOR_SPEED=45
+LEGOBOT_TRACK_MODE=start
 ```
 
 Les yeux ont une amplitude volontairement reduite pour eviter de toucher

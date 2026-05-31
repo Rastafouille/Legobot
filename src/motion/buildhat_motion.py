@@ -44,6 +44,7 @@ class BuildHatMotion:
         self.move_seconds = float(os.getenv("LEGOBOT_MOVE_SECONDS", move_seconds))
         self.head_degrees = int(os.getenv("LEGOBOT_HEAD_DEGREES", head_degrees))
         self.eyes_degrees = int(os.getenv("LEGOBOT_EYES_DEGREES", eyes_degrees))
+        self.track_mode = os.getenv("LEGOBOT_TRACK_MODE", "start").strip().lower()
         self.left_sign = -1 if self._env_bool("LEGOBOT_LEFT_INVERTED", left_inverted) else 1
         self.right_sign = -1 if self._env_bool("LEGOBOT_RIGHT_INVERTED", right_inverted) else 1
         self._lock = threading.Lock()
@@ -228,7 +229,7 @@ class BuildHatMotion:
         try:
             with self._lock:
                 if port in {self.left_port.upper(), self.right_port.upper()}:
-                    motor.pwm(speed / 100.0)
+                    self._run_track_motor(motor, speed)
                 else:
                     motor.start(speed)
             time.sleep(seconds)
@@ -330,17 +331,25 @@ class BuildHatMotion:
             self.setup_error = str(exc)
 
     def _start_tracks(self, hardware_left_speed, hardware_right_speed):
-        # Les chenilles repondent mieux en PWM direct qu'avec start(speed).
-        # Les signes sont deja corriges avant d'arriver ici.
+        # Les signes sont deja corriges avant d'arriver ici. Le mode start est
+        # le plus visible sur certains moteurs LEGO; pwm reste disponible via
+        # LEGOBOT_TRACK_MODE=pwm si besoin.
         with self._lock:
             try:
-                self.left.pwm(max(-1.0, min(1.0, hardware_left_speed / 100.0)))
-                self.right.pwm(max(-1.0, min(1.0, hardware_right_speed / 100.0)))
+                self._run_track_motor(self.left, hardware_left_speed)
+                self._run_track_motor(self.right, hardware_right_speed)
                 self.motor_errors.pop("tracks", None)
                 return None
             except Exception as exc:
                 self.motor_errors["tracks"] = str(exc)
                 return str(exc)
+
+    def _run_track_motor(self, motor, speed):
+        speed = max(-100, min(100, int(speed)))
+        if self.track_mode == "pwm":
+            motor.pwm(max(-1.0, min(1.0, speed / 100.0)))
+        else:
+            motor.start(speed)
 
     def _run_motor(self, motor, method_name, *args, **kwargs):
         with self._lock:
@@ -395,6 +404,7 @@ class BuildHatMotion:
                 "move_seconds": self.move_seconds,
                 "head_degrees": self.head_degrees,
                 "eyes_degrees": self.eyes_degrees,
+                "track_mode": self.track_mode,
             },
             "motor_errors": dict(self.motor_errors),
         }
