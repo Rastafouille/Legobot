@@ -22,7 +22,8 @@ DEFAULT_ROBOT_NAME = os.getenv("LEGOBOT_ROBOT_NAME", "Briqo")
 DEFAULT_VOICE_MODEL = os.getenv("LEGOBOT_VOICE_MODEL", "next")
 HISTORY_FILE = Path(os.getenv("LEGOBOT_HISTORY_FILE", "data/conversation_history.jsonl"))
 HISTORY_MAX_MESSAGES = int(os.getenv("LEGOBOT_HISTORY_MAX_MESSAGES", "24"))
-DEFAULT_WAKE_SILENCE_SECONDS = float(os.getenv("LEGOBOT_WAKE_SILENCE_SECONDS", "0.55"))
+DEFAULT_WAKE_SILENCE_SECONDS = float(os.getenv("LEGOBOT_WAKE_SILENCE_SECONDS", "0.45"))
+DEFAULT_WAKE_MAX_SECONDS = float(os.getenv("LEGOBOT_WAKE_MAX_SECONDS", "5.0"))
 DEFAULT_WAKE_ON_START = os.getenv("LEGOBOT_WAKE_ON_START", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 ALLOWED_AI_MOTIONS = {
@@ -618,7 +619,7 @@ def create_app(motion, face=None):
             "speak": True,
             "allow_actions": True,
             "silence_seconds": DEFAULT_WAKE_SILENCE_SECONDS,
-            "max_seconds": 10.0,
+            "max_seconds": DEFAULT_WAKE_MAX_SECONDS,
             "wake_words": ["ok briko", "ok brico", "okay briko", "okay brico"],
         }
         if overrides:
@@ -943,7 +944,7 @@ def create_app(motion, face=None):
                     text = get_stt().listen_after_wake(
                         wake_words=config.get("wake_words") or ["ok briko", "ok brico", "okay briko", "okay brico"],
                         silence_seconds=float(config.get("silence_seconds", DEFAULT_WAKE_SILENCE_SECONDS)),
-                        max_seconds=float(config.get("max_seconds", 10.0)),
+                        max_seconds=float(config.get("max_seconds", DEFAULT_WAKE_MAX_SECONDS)),
                         on_event=wake_event,
                         should_stop=lambda: not wake_state["enabled"],
                     )
@@ -1431,7 +1432,7 @@ Question utilisateur:
             "speak": bool(payload.get("speak", True)),
             "allow_actions": bool(payload.get("allow_actions", True)),
             "silence_seconds": float(payload.get("silence_seconds", DEFAULT_WAKE_SILENCE_SECONDS)),
-            "max_seconds": float(payload.get("max_seconds", 10.0)),
+            "max_seconds": float(payload.get("max_seconds", DEFAULT_WAKE_MAX_SECONDS)),
             "wake_words": payload.get("wake_words") or ["ok briko", "ok brico", "okay briko", "okay brico"],
         })
         set_face_expression("sourire")

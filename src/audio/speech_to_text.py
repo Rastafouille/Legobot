@@ -19,6 +19,7 @@ class SpeechToText:
         self.device = device or os.getenv("LEGOBOT_MIC_DEVICE", "plughw:CARD=Device,DEV=0")
         self.sample_rate = int(os.getenv("LEGOBOT_MIC_RATE", "16000"))
         self.silence_rms = int(os.getenv("LEGOBOT_MIC_SILENCE_RMS", "450"))
+        self.speech_rms = int(os.getenv("LEGOBOT_MIC_SPEECH_RMS", str(max(900, self.silence_rms * 2))))
         self.tmp_dir = Path(os.getenv("LEGOBOT_STT_TMP_DIR", "/tmp"))
         self._model = None
 
@@ -75,11 +76,11 @@ class SpeechToText:
             parts.append(final_text)
         return " ".join(parts).strip()
 
-    def listen_after_wake(self, wake_words=None, silence_seconds=0.55, max_seconds=10.0, on_event=None, should_stop=None):
+    def listen_after_wake(self, wake_words=None, silence_seconds=0.45, max_seconds=5.0, on_event=None, should_stop=None):
         """Attend le mot-cle, puis enregistre la phrase jusqu'au silence."""
         wake_words = wake_words or ["ok briko", "ok brico", "okay briko", "okay brico"]
-        silence_seconds = max(0.25, min(3.0, float(silence_seconds)))
-        max_seconds = max(2.0, min(20.0, float(max_seconds)))
+        silence_seconds = max(0.2, min(2.0, float(silence_seconds)))
+        max_seconds = max(2.0, min(12.0, float(max_seconds)))
         model = self._load_model()
         wake_recognizer = KaldiRecognizer(model, self.sample_rate)
         chunk_frames = int(self.sample_rate * 0.2)
@@ -138,12 +139,14 @@ class SpeechToText:
                 process.kill()
 
     def _record_until_silence(self, process, first_chunk, silence_seconds, max_seconds, chunk_bytes, on_event=None, should_stop=None):
-        # Detection volontairement simple: assez robuste sur Raspberry, et
-        # reglable avec LEGOBOT_MIC_SILENCE_RMS selon le bruit de la piece.
+        # Le seuil de parole est volontairement plus haut que le seuil de bruit:
+        # avec un micro USB, le fond sonore peut rester au-dessus de 450 RMS et
+        # empecher la fin d'ecoute. LEGOBOT_MIC_SPEECH_RMS permet d'ajuster.
         frames = [first_chunk] if first_chunk else []
         started = False
         silence_started = None
         start_time = time.monotonic()
+        no_speech_timeout = min(1.2, max_seconds)
         while time.monotonic() - start_time < max_seconds:
             if should_stop and should_stop():
                 break
@@ -152,7 +155,7 @@ class SpeechToText:
                 break
             frames.append(data)
             rms = audioop.rms(data, 2)
-            if rms >= self.silence_rms:
+            if rms >= self.speech_rms:
                 started = True
                 silence_started = None
                 if on_event:
@@ -162,6 +165,8 @@ class SpeechToText:
                     silence_started = time.monotonic()
                 elif time.monotonic() - silence_started >= silence_seconds:
                     break
+            elif time.monotonic() - start_time >= no_speech_timeout:
+                break
         return b"".join(frames)
 
     def _transcribe_pcm(self, pcm):
